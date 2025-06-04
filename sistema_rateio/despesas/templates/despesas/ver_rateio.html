@@ -17,14 +17,7 @@
 
 {% else %}
     <p><strong>Total:</strong>
-      R$
-      {% if input_total is not None %}
-        {{ input_total|floatformat:2 }}
-      {% elif total_rateio is not None %}
-        {{ total_rateio|floatformat:2 }}
-      {% else %}
-        {{ despesa.valor_total|floatformat:2 }}
-      {% endif %}
+       R$ {{ total_rateio|default:despesa.valor_total|floatformat:2 }}
     </p>
 {% endif %}
 
