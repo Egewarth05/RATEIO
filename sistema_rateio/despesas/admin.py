@@ -317,7 +317,7 @@ class DespesaEnergiaAdmin(admin.ModelAdmin):
             ano=obj.ano
         ).delete()
 
-        # 2) Força o Tipo para “Energia Áreas Comuns”
+        # 2) Força o tipo para “Energia Salão”
         obj.tipo = TipoDespesa.objects.get(nome__iexact='Energia Salão')
 
         # 3) Guarda os parâmetros vindos do formulário no JSONField
@@ -330,10 +330,8 @@ class DespesaEnergiaAdmin(admin.ModelAdmin):
             }
         }
 
-        # 4) Calcula `valor_total` usando *Custo kWh* em vez de *Uso kWh*
-        #
-        #    Valor Áreas Comuns = TotalLeituras × Custo kWh
-        #
+        # 4) Calcula `valor_total` para “Energia Salão”
+        #    (por exemplo, você usa aqui total_kwh * custo_kwh)
         try:
             mes_int = int(obj.mes)
             ano_int = int(obj.ano)
@@ -351,18 +349,43 @@ class DespesaEnergiaAdmin(admin.ModelAdmin):
         else:
             total_kwh = Decimal('0')
 
-        # pega o custo por kWh que o usuário informou:
         raw_custo = form.cleaned_data.get('custo_kwh') or 0
         try:
             custo = Decimal(str(raw_custo))
         except:
             custo = Decimal('0')
 
-        valor_areas = (Decimal(total_kwh) * custo).quantize(Decimal('0.01'), ROUND_HALF_UP)
-        obj.valor_total = valor_areas
+        # Neste ponto, `obj.valor_total` conterá o valor que você quer que apareça
+        # em “Energia Salão” (por exemplo, rateio interno baseado em consumo).
+        valor_energia_salao = (Decimal(total_kwh) * custo).quantize(Decimal('0.01'), ROUND_HALF_UP)
+        obj.valor_total = valor_energia_salao
 
-        # 5) Salva o objeto no banco **depois** de ajustar valor_total
+        # 5) Salva o objeto “Energia Salão” no banco
         super().save_model(request, obj, form, change)
+
+        # ------------------------------------
+        # 6) Agora, CRIA (ou ATUALIZA) a despesa “Energia Áreas Comuns” para o mesmo mês/ano
+        # ------------------------------------
+        tipo_areas = TipoDespesa.objects.get(nome__iexact='Energia Áreas Comuns')
+        # Se porventura já existir (embora tenhamos apagado acima), podemos usar get_or_create
+        eac_obj, created = Despesa.objects.get_or_create(
+            tipo=tipo_areas,
+            mes=obj.mes,
+            ano=obj.ano,
+            defaults={
+                'descricao': f"Áreas Comuns — {obj.mes}/{obj.ano}",
+                # preenchemos abaixo o valor_total
+                'valor_total': Decimal('0.00'),
+            }
+        )
+
+        # Recalcula o valor de “Energia Áreas Comuns” = total_kwh * custo_kwh
+        # Se você quiser que “Energia Áreas Comuns” retenha arquitetura semelhante ao proxy,
+        # basta usar o mesmo cálculo:
+        valor_areas = (Decimal(total_kwh) * custo).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+        eac_obj.valor_total = valor_areas
+        eac_obj.save()
 
 @admin.register(DespesaAreasComuns)
 class DespesaAreasComunsAdmin(admin.ModelAdmin):
