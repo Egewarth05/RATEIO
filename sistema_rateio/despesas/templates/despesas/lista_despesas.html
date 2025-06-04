@@ -156,7 +156,7 @@
             <td>{{ despesa.get_mes_display }}</td>
             <td>{{ despesa.ano }}</td>
             <td class="valor-total" id="valor-total-despesa-{{ despesa.id }}">
-              R$ {{ despesa.valor_total|floatformat:2 }}
+             R$ {{ despesa.valor_exibido|floatformat:2 }}
             </td>
             <td>
               <a href="{% url 'ver_rateio' despesa.id %}" class="btn btn-sm btn-outline-primary">Ver</a>
