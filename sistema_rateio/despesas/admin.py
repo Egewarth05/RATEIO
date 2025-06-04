@@ -352,8 +352,14 @@ class DespesaEnergiaAdmin(admin.ModelAdmin):
         raw_custo = form.cleaned_data.get('custo_kwh') or 0
         try:
             custo = Decimal(str(raw_custo))
-        except:
+        except Exception:
             custo = Decimal('0')
+
+        raw_fatura = form.cleaned_data.get('fatura') or 0
+        try:
+            fatura = Decimal(str(raw_fatura))
+        except Exception:
+            fatura = Decimal('0')
 
         # Neste ponto, `obj.valor_total` conterá o valor que você quer que apareça
         # em “Energia Salão” (por exemplo, rateio interno baseado em consumo).
@@ -382,7 +388,9 @@ class DespesaEnergiaAdmin(admin.ModelAdmin):
         # Recalcula o valor de “Energia Áreas Comuns” = total_kwh * custo_kwh
         # Se você quiser que “Energia Áreas Comuns” retenha arquitetura semelhante ao proxy,
         # basta usar o mesmo cálculo:
-        valor_areas = (Decimal(total_kwh) * custo).quantize(Decimal('0.01'), ROUND_HALF_UP)
+        valor_areas = (
+            Decimal(str(fatura)) - (custo * Decimal(total_kwh))
+        ).quantize(Decimal('0.01'), ROUND_HALF_UP)
 
         eac_obj.valor_total = valor_areas
         eac_obj.save()
