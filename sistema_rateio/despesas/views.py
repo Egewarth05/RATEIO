@@ -62,7 +62,55 @@ def lista_despesas(request):
 
     # AQUI: para **todos** os objetos, usamos valor_total como valor_exibido.
     for d in despesas:
-        d.valor_exibido = d.valor_total
+        if d.tipo and d.tipo.nome.lower() == 'energia áreas comuns':
+            # 1) pegar a fatura e o custo_kwh da despesa "Energia Salão"
+            energia = (
+                Despesa.objects
+                .filter(
+                    mes=str(int(d.mes)),
+                    ano=d.ano,
+                    tipo__nome__iexact='Energia Salão'
+                )
+                .order_by('-id')
+                .first()
+            )
+
+            if energia and energia.energia_leituras:
+                params = energia.energia_leituras.get('params', {})
+                raw_fatura = params.get('fatura', 0)
+                raw_custo = params.get('custo_kwh', 0)
+            else:
+                raw_fatura = 0
+                raw_custo = 0
+
+            try:
+                fatura = Decimal(str(raw_fatura))
+            except Exception:
+                fatura = Decimal('0')
+            try:
+                custo = Decimal(str(raw_custo))
+            except Exception:
+                custo = Decimal('0')
+
+            # 2) total de kWh consumidos no mês
+            try:
+                mes_int = int(d.mes)
+                ano_int = int(d.ano)
+                agregado = (
+                    LeituraEnergia.objects
+                    .filter(mes=mes_int, ano=ano_int)
+                    .aggregate(total=Sum('leitura'))
+                )
+                total_kwh = agregado.get('total') or Decimal('0')
+            except Exception:
+                total_kwh = Decimal('0')
+
+            # 3) cálculo final
+            d.valor_exibido = (
+                fatura - (custo * total_kwh)
+            ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        else:
+            d.valor_exibido = d.valor_total
 
     anos_distintos = despesas.values_list('ano', flat=True).distinct()
     anos_distintos = sorted(int(a) for a in anos_distintos)
