@@ -33,7 +33,7 @@ def lista_despesas(request):
     current_sort = request.GET.get('sort', 'recentes')
     qs = Despesa.objects.exclude(tipo__nome__iexact='Fundo de Reserva')
 
-    # pega os filtros da querystring
+    # filtros de tipo / mês / ano
     tipo = request.GET.get('tipo')
     mes  = request.GET.get('mes')
     ano  = request.GET.get('ano')
@@ -45,7 +45,7 @@ def lista_despesas(request):
     if ano:
         qs = qs.filter(ano=ano)
 
-    # ordena antes de anotar
+    # ordenação
     if current_sort == 'alpha':
         qs = qs.order_by('tipo__nome', 'ano', 'mes')
     else:
@@ -60,48 +60,9 @@ def lista_despesas(request):
         )
     )
 
+    # AQUI: para **todos** os objetos, usamos valor_total como valor_exibido.
     for d in despesas:
-        nome_tipo = (d.tipo.nome or '').strip().lower()
-        if nome_tipo == 'energia áreas comuns':
-            # 1) Buscamos a última despesa “Energia Salão” para o mesmo mês/ano
-            energia_salao = Despesa.objects.filter(
-                tipo__nome__iexact='Energia Salão',
-                mes=d.mes,
-                ano=d.ano
-            ).order_by('-id').first()
-
-            # 2) Se existir e tiver JSON de params, extraímos fatura e custo_kwh
-            if energia_salao and getattr(energia_salao, 'energia_leituras', None):
-                params = energia_salao.energia_leituras.get('params', {})
-                try:
-                    fatura = Decimal(str(params.get('fatura', 0)))
-                except:
-                    fatura = Decimal('0')
-                try:
-                    custo_kwh = Decimal(str(params.get('custo_kwh', 0)))
-                except:
-                    custo_kwh = Decimal('0')
-            else:
-                fatura = Decimal('0')
-                custo_kwh = Decimal('0')
-
-            # 3) Somamos todas as leituras de LeituraEnergia para aquele mês/ano
-            #    (é o total de kWh consumidos)
-            agreg = LeituraEnergia.objects.filter(
-                mes=int(d.mes),
-                ano=d.ano
-            ).aggregate(total=Sum('leitura'))
-            total_kwh = agreg.get('total') or Decimal('0')
-
-            # 4) Calculamos: fatura − (custo_kwh × total_kwh); arredondamos em 2 casas
-            valor_calc = (fatura - (custo_kwh * total_kwh)).quantize(
-                Decimal('0.01'),
-                rounding=ROUND_HALF_UP
-            )
-            d.valor_exibido = valor_calc
-        else:
-            # para qualquer outro tipo, exibimos o valor bruto
-            d.valor_exibido = d.valor_total
+        d.valor_exibido = d.valor_total
 
     anos_distintos = despesas.values_list('ano', flat=True).distinct()
     anos_distintos = sorted(int(a) for a in anos_distintos)
@@ -427,37 +388,49 @@ def nova_despesa(request):
 
             return redirect('lista_despesas')
 
+        # --- ENERGIA ÁREAS COMUNS (único bloco) ---
+        elif tipo.nome.lower() == "energia áreas comuns":
+            # pega o valor exato que o usuário digitou no form (ou no Admin)
+            despesa.valor_total = parse_float(request.POST.get('valor_unico', 0))
+            despesa.save()
+
+            # busca frações e cria rateio usando esse valor exato
+            fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
+            pct_map = {
+                f.unidade.id: Decimal(str(f.percentual))
+                for f in fracoes_qs
+            }
+
+            sala = Unidade.objects.get(nome__icontains="Sala")
+            pct_sala = pct_map.get(sala.id, Decimal('0'))
+            if pct_sala > 1:
+                pct_sala = pct_sala / Decimal('100')
+
+            # metade da cota da sala
+            sala_share = (despesa.valor_total * pct_sala / Decimal('2')).quantize(
+                Decimal('0.01'),
+                rounding=ROUND_HALF_UP
+            )
+            restante = despesa.valor_total - sala_share
+
+            Rateio.objects.create(despesa=despesa, unidade=sala, valor=sala_share)
+            for f in fracoes_qs:
+                if f.unidade.id == sala.id:
+                    continue
+                pct = Decimal(str(f.percentual))
+                if pct > 1:
+                    pct = pct / Decimal('100')
+                share = (restante * pct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                Rateio.objects.create(despesa=despesa, unidade=f.unidade, valor=share)
+
+            return redirect('lista_despesas')
+
         # === TAXA BOLETO ===
         elif tipo.nome.lower() == "taxa boleto":
             valor_boleto = parse_float(request.POST.get('valor_unico'))
             for u in unidades:
                 valores_por_unidade[u] = valor_boleto
                 total += valor_boleto
-
-        elif tipo.nome.lower() == "energia áreas comuns":
-            valor_unico = parse_float(request.POST.get('valor_unico'))
-            despesa.valor_total = valor_unico
-            despesa.save()
-
-            sala = Unidade.objects.get(nome__icontains='Sala')
-            pct_sala = fracoes_map[sala.id]
-            if pct_sala > 1:
-                pct_sala /= 100
-
-            share_sala = round(valor_unico * pct_sala / 2, 2)
-            Rateio.objects.create(despesa=despesa, unidade=sala, valor=share_sala)
-
-            restante = valor_unico - share_sala
-            for unid, pct in fracoes_map.items():
-                if unid == sala.id:
-                    continue
-                unidade = Unidade.objects.get(id=unid)
-                if pct > 1:
-                    pct /= 100
-                v = round(restante * pct, 2)
-                Rateio.objects.create(despesa=despesa, unidade=unidade, valor=v)
-
-            return redirect('lista_despesas')
 
         # === FRAÇÃO (por tipo de despesa) ===
         elif fracoes_map:
@@ -677,92 +650,7 @@ def ver_rateio(request, despesa_id):
             'total_leituras': total_leituras,
         })
 
-        # --- ENERGIA ÁREAS COMUNS ---
-    elif despesa.tipo.nome.lower() == "energia áreas comuns":
-        # 1) (Opcional) buscar parâmetros de “Energia Salão” para este mês/ano
-        salon = Despesa.objects.filter(
-            tipo__nome__iexact='Energia Salão',
-            mes=despesa.mes,
-            ano=despesa.ano
-        ).order_by('-id').first()
-        if salon and salon.energia_leituras:
-            params = salon.energia_leituras.get('params', {})
-            fatura   = params.get('fatura', 0)
-            uso_kwh  = params.get('uso_kwh',  0)
-        else:
-            fatura = uso_kwh = 0
 
-        # 2) pega diretamente o valor_total salvo no banco
-        valor_areas_comuns = despesa.valor_total
-
-        # 3) (Opcional) se quiser exibir “total_leituras” no template, calcula:
-        total_leituras = 0
-        mes_atual = int(despesa.mes)
-        ano_atual = int(despesa.ano)
-        if mes_atual > 1:
-            mes_ant, ano_ant = mes_atual - 1, ano_atual
-        else:
-            mes_ant, ano_ant = 12, ano_atual - 1
-
-        for u in Unidade.objects.all():
-            ant1 = LeituraEnergia.objects.filter(
-                unidade=u, medidor=1,
-                mes=mes_ant, ano=ano_ant
-            ).first()
-            atu1 = LeituraEnergia.objects.filter(
-                unidade=u, medidor=1,
-                mes=mes_atual, ano=ano_atual
-            ).first()
-            ant2 = LeituraEnergia.objects.filter(
-                unidade=u, medidor=2,
-                mes=mes_ant, ano=ano_ant
-            ).first()
-            atu2 = LeituraEnergia.objects.filter(
-                unidade=u, medidor=2,
-                mes=mes_atual, ano=ano_atual
-            ).first()
-
-            la1 = float(ant1.leitura) if ant1 else 0
-            lk1 = float(atu1.leitura) if atu1 else 0
-            la2 = float(ant2.leitura) if ant2 else 0
-            lk2 = float(atu2.leitura) if atu2 else 0
-
-            total_leituras += (lk1 - la1) + (lk2 - la2)
-
-        # 4) monta a lista de frações para exibir no template:
-        fracoes = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
-        pct_map = {f.unidade.id: Decimal(str(f.percentual)) for f in fracoes}
-
-        sala = Unidade.objects.get(nome__icontains="Sala")
-        pct_sala = pct_map.get(sala.id, Decimal('0'))
-        # Se for maior que 1 (porcentagem em 100-por-cen to), divida por 100:
-        if pct_sala > 1:
-            pct_sala = pct_sala / Decimal('100')
-
-        # Agora faça toda a conta em Decimal:
-        # valor_areas_comuns é Decimal, pct_sala é Decimal, divisor "2" também transformado em Decimal
-        sala_share = (valor_areas_comuns * pct_sala / Decimal('2')).quantize(
-            Decimal('0.01'),
-            rounding=ROUND_HALF_UP
-        )
-        restante = valor_areas_comuns - sala_share
-
-        fracoes_valores = [{"unidade": sala, "valor": sala_share}]
-        for f in fracoes:
-            if f.unidade.id == sala.id:
-                continue
-            pct = pct_map[f.unidade.id]
-            if pct > 1:
-                pct = pct / Decimal('100')
-            share = (restante * pct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            fracoes_valores.append({"unidade": f.unidade, "valor": share})
-
-        return render(request, 'despesas/ver_rateio.html', {
-            'despesa':         despesa,
-            'fracoes_valores': fracoes_valores,
-            'input_total':     valor_areas_comuns,  # mostra exatamente o valor_total do Admin
-            'total_leituras':  total_leituras,      # caso queira exibir no template
-        })
 
     # --- FRAÇÃO ---
     fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
