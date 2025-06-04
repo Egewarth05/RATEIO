@@ -1,0 +1,818 @@
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib import messages
+from django.http import JsonResponse
+from .forms import DespesaForm
+from .models import (
+    Despesa, Unidade, Rateio, TipoDespesa,
+    LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
+)
+from datetime import datetime
+import json
+from decimal import Decimal, ROUND_HALF_UP
+from django.db.models import Q, Sum
+from django.views.decorators.csrf import csrf_exempt
+
+MESES_CHOICES = [
+    (1,  'Janeiro'),
+    (2,  'Fevereiro'),
+    (3,  'Março'),
+    (4,  'Abril'),
+    (5,  'Maio'),
+    (6,  'Junho'),
+    (7,  'Julho'),
+    (8,  'Agosto'),
+    (9,  'Setembro'),
+    (10, 'Outubro'),
+    (11, 'Novembro'),
+    (12, 'Dezembro'),
+]
+
+ANOS_DISPONIVEIS = [2025, 2026, 2027]
+
+def lista_despesas(request):
+    current_sort = request.GET.get('sort', 'recentes')
+    qs = Despesa.objects.exclude(tipo__nome__iexact='Fundo de Reserva')
+
+    # pega os filtros da querystring
+    tipo = request.GET.get('tipo')
+    mes  = request.GET.get('mes')
+    ano  = request.GET.get('ano')
+
+    if tipo:
+        qs = qs.filter(tipo_id=tipo)
+    if mes:
+        qs = qs.filter(mes=mes)
+    if ano:
+        qs = qs.filter(ano=ano)
+
+    # ordena antes de anotar
+    if current_sort == 'alpha':
+        qs = qs.order_by('tipo__nome', 'ano', 'mes')
+    else:
+        qs = qs.order_by('-id')
+
+    despesas = (
+        qs
+        .annotate(total_rateado=Sum('rateio__valor'))
+        .filter(
+            Q(total_rateado__gt=0)
+            | Q(tipo__nome__iexact='Energia Áreas Comuns')
+        )
+    )
+
+    for d in despesas:
+        nome_tipo = (d.tipo.nome or '').strip().lower()
+        if nome_tipo == 'energia áreas comuns':
+            # 1) Buscamos a última despesa “Energia Salão” para o mesmo mês/ano
+            energia_salao = Despesa.objects.filter(
+                tipo__nome__iexact='Energia Salão',
+                mes=d.mes,
+                ano=d.ano
+            ).order_by('-id').first()
+
+            # 2) Se existir e tiver JSON de params, extraímos fatura e custo_kwh
+            if energia_salao and getattr(energia_salao, 'energia_leituras', None):
+                params = energia_salao.energia_leituras.get('params', {})
+                try:
+                    fatura = Decimal(str(params.get('fatura', 0)))
+                except:
+                    fatura = Decimal('0')
+                try:
+                    custo_kwh = Decimal(str(params.get('custo_kwh', 0)))
+                except:
+                    custo_kwh = Decimal('0')
+            else:
+                fatura = Decimal('0')
+                custo_kwh = Decimal('0')
+
+            # 3) Somamos todas as leituras de LeituraEnergia para aquele mês/ano
+            #    (é o total de kWh consumidos)
+            agreg = LeituraEnergia.objects.filter(
+                mes=int(d.mes),
+                ano=d.ano
+            ).aggregate(total=Sum('leitura'))
+            total_kwh = agreg.get('total') or Decimal('0')
+
+            # 4) Calculamos: fatura − (custo_kwh × total_kwh); arredondamos em 2 casas
+            valor_calc = (fatura - (custo_kwh * total_kwh)).quantize(
+                Decimal('0.01'),
+                rounding=ROUND_HALF_UP
+            )
+            d.valor_exibido = valor_calc
+        else:
+            # para qualquer outro tipo, exibimos o valor bruto
+            d.valor_exibido = d.valor_total
+
+    anos_distintos = despesas.values_list('ano', flat=True).distinct()
+    anos_distintos = sorted(int(a) for a in anos_distintos)
+
+    meses_distintos = despesas.values_list('mes', flat=True).distinct()
+    meses_distintos = sorted(int(m) for m in meses_distintos)
+
+    tipos_distintos = TipoDespesa.objects.filter(
+        id__in=despesas.values_list('tipo_id', flat=True).distinct()
+    )
+
+    return render(request, 'despesas/lista_despesas.html', {
+        'despesas':         despesas,
+        'MESES_CHOICES':    MESES_CHOICES,
+        'MESES_DISTINTOS':  meses_distintos,
+        'ANOS_DISPONIVEIS': ANOS_DISPONIVEIS,
+        'ANOS_DISTINTOS':   anos_distintos,
+        'tipos_distintos':  tipos_distintos,
+        'current_sort':     current_sort,
+    })
+
+
+def nova_despesa(request):
+    tipos = TipoDespesa.objects.exclude(nome__iexact='Fundo de Reserva')
+    leituras_anteriores = {}
+    leituras_agua_anteriores = {}
+    form = DespesaForm()
+    form.fields['tipo'].queryset = tipos
+    unidades = Unidade.objects.order_by('nome')
+
+    # iniciais (gás e água)
+    recarga_initial = kg_initial = m3kg_initial = valor_m3_initial = 0
+    fatura_initial = m3total_initial = agua_valor_m3_initial = 0
+
+    # --- GET: tipo, mês e ano ---
+    mes_str     = request.GET.get('mes')
+    ano_str     = request.GET.get('ano')
+    tipo_id_str = request.GET.get('tipo')
+    mes = int(mes_str) if mes_str and mes_str.isdigit() else datetime.now().month
+    ano = int(ano_str) if ano_str and ano_str.isdigit() else datetime.now().year
+
+    # pega o objeto TipoDespesa
+    if tipo_id_str and tipo_id_str.isdigit():
+        tipo = TipoDespesa.objects.filter(id=int(tipo_id_str)).first() or TipoDespesa.objects.first()
+    else:
+        tipo = TipoDespesa.objects.first()
+    if not tipo:
+        messages.error(request, "Nenhum TipoDespesa cadastrado.")
+        return redirect("lista_despesas")
+    tipo_id = tipo.id
+
+    # mapeia frações
+    fracoes_map = {
+        f.unidade.id: float(f.percentual)
+        for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo)
+    }
+
+    # calcula mês/ano anterior
+    if mes > 1:
+        mes_ant, ano_ant = mes - 1, ano
+    else:
+        mes_ant, ano_ant = 12, ano - 1
+
+    # buscar parâmetros de energia do mês anterior
+    fatura_energy_initial = kwh_initial = custo_kwh_initial = 0
+    ultima_energia = Despesa.objects.filter(
+        tipo__nome__iexact="energia salão",
+        mes=str(mes_ant),
+        ano=ano_ant
+    ).order_by('-id').first()
+    if ultima_energia and ultima_energia.energia_leituras:
+        params = ultima_energia.energia_leituras.get('params', {})
+        fatura_energy_initial  = params.get('fatura', 0)
+        kwh_initial             = params.get('kwh_total', 1)
+        custo_kwh_initial       = params.get('custo_kwh', 0)
+
+    # parâmetros de GÁS do mês anterior
+    ultima_gas = Despesa.objects.filter(
+        tipo=tipo, mes=str(mes_ant), ano=ano_ant
+    ).order_by('-id').first()
+    if ultima_gas and ultima_gas.gas_leituras and 'params' in ultima_gas.gas_leituras:
+        params = ultima_gas.gas_leituras['params']
+        recarga_initial   = params.get('recarga', 0)
+        kg_initial        = params.get('kg',      1)
+        m3kg_initial      = params.get('m3_kg',   1)
+        valor_m3_initial  = params.get('valor_m3',0)
+
+    # parâmetros de ÁGUA do mês anterior
+    ultima_agua = Despesa.objects.filter(
+        tipo=tipo, mes=str(mes_ant), ano=ano_ant
+    ).order_by('-id').first()
+    if ultima_agua and ultima_agua.agua_leituras and 'params' in ultima_agua.agua_leituras:
+        params = ultima_agua.agua_leituras['params']
+        fatura_initial        = params.get('fatura',   fatura_initial)
+        m3total_initial       = params.get('m3_total', m3total_initial)
+        agua_valor_m3_initial = params.get('valor_m3', agua_valor_m3_initial)
+
+    # leituras anteriores de GÁS
+    leituras_anteriores = {}
+    for u in unidades:
+        lec = LeituraGas.objects.filter(
+            unidade=u, mes=mes_ant, ano=ano_ant
+        ).first()
+        leituras_anteriores[u.id] = float(lec.leitura) if lec else 0
+
+    # 2) popula leituras anteriores de ÁGUA
+    leituras_agua_anteriores = {}
+    for u in unidades:
+        lac = LeituraAgua.objects.filter(
+            unidade=u, mes=mes_ant, ano=ano_ant
+        ).first()
+        leituras_agua_anteriores[u.id] = float(lac.leitura) if lac else 0
+
+    # 3) popula leituras anteriores de ENERGIA (medidor 1 e 2)
+    leituras_anteriores_energia1 = {}
+    leituras_anteriores_energia2 = {}
+    for u in unidades:
+        lec1 = LeituraEnergia.objects.filter(
+            unidade=u, mes=mes_ant, ano=ano_ant, medidor=1
+        ).first()
+        lec2 = LeituraEnergia.objects.filter(
+            unidade=u, mes=mes_ant, ano=ano_ant, medidor=2
+        ).first()
+        leituras_anteriores_energia1[u.id] = float(lec1.leitura) if lec1 else 0
+        leituras_anteriores_energia2[u.id] = float(lec2.leitura) if lec2 else 0
+
+    uso_kwh_initial = {
+        uid: leituras_anteriores_energia2.get(uid, 0)
+             - leituras_anteriores_energia1.get(uid, 0)
+        for uid in leituras_anteriores_energia1
+    }
+
+    # se for GET, renderiza o form com todos os iniciais
+    if request.method != 'POST':
+        return render(request, 'despesas/nova_despesa.html', {
+            'form':                          form,
+            'unidades':                     unidades,
+            'leituras_anteriores':          leituras_anteriores,
+            'leituras_agua_anteriores':     leituras_agua_anteriores,
+            'recarga_initial':              recarga_initial,
+            'kg_initial':                   kg_initial,
+            'm3kg_initial':                 m3kg_initial,
+            'valor_m3_initial':             valor_m3_initial,
+            'agua_fatura_initial':          fatura_initial,
+            'agua_m3_total_initial':        m3total_initial,
+            'agua_valor_m3_initial':        agua_valor_m3_initial,
+            'leituras_energia_anteriores_med1': leituras_anteriores_energia1,
+            'leituras_energia_anteriores_med2': leituras_anteriores_energia2,
+            'energia_fatura_initial':       fatura_energy_initial,
+            'energia_kwh_total_initial':    kwh_initial,
+            'energia_custo_kwh_initial':    custo_kwh_initial,
+            'energia_uso_kwh_initial':      uso_kwh_initial,
+            'mes':                           mes,
+            'ano':                           ano,
+            'tipo_id':                       tipo_id,
+            'tipo':                          tipo,
+            'fracoes_map':                   fracoes_map,
+        })
+
+    # === processamento do POST ===
+    form = DespesaForm(request.POST)
+    tipo = get_object_or_404(TipoDespesa, id=int(request.POST.get('tipo', tipo_id)))
+
+    if form.is_valid():
+        despesa = form.save(commit=False)
+        despesa.tipo = tipo
+        total = 0
+        despesa.descricao = request.POST.get('descricao_unico', '').strip()
+        valores_por_unidade = {}
+        consumos_por_unidade = {}
+
+        def parse_float(v, default=0):
+            try:
+                return float(str(v).replace(',', '.'))
+            except:
+                return default
+
+        # === GÁS ===
+        if tipo.nome.lower() == "gás":
+            recarga = parse_float(request.POST.get('recarga'))
+            kg      = parse_float(request.POST.get('kg'), 1)
+            m3_kg   = parse_float(request.POST.get('m3_kg'), 1)
+            preco   = parse_float(request.POST.get('valor_m3'))
+
+            for u in unidades:
+                raw = request.POST.get(f'atual_{u.id}', '').strip()
+                if not raw:
+                    c = 0
+                else:
+                    atual = parse_float(raw)
+                    ant   = leituras_anteriores.get(u.id, 0)
+                    c = max(atual - ant, 0)
+                    LeituraGas.objects.update_or_create(
+                        unidade=u, mes=int(despesa.mes), ano=despesa.ano,
+                        defaults={'leitura': atual}
+                    )
+
+                v = c * preco
+                valores_por_unidade[u]     = v
+                consumos_por_unidade[u.id] = c
+                total += v
+
+            despesa.gas_leituras = {
+                'params': {
+                    'recarga':   recarga,
+                    'kg':        kg,
+                    'm3_kg':     m3_kg,
+                    'valor_m3':  preco,
+                },
+                'leituras': leituras_anteriores,
+            }
+
+        # === ÁGUA ===
+        elif tipo.nome.lower() == "água":
+            fatura   = parse_float(request.POST.get('agua_fatura'))
+            m3_total = parse_float(request.POST.get('agua_m3_total'), 1)
+            valor_m3 = (fatura / m3_total) if m3_total else 0
+            for u in unidades:
+                atual = parse_float(request.POST.get(f'agua_atual_{u.id}'))
+                ant   = leituras_agua_anteriores.get(u.id, 0)
+                c     = atual - ant
+                v     = c * valor_m3
+                valores_por_unidade[u]     = v
+                consumos_por_unidade[u.id] = c
+                total += v
+                LeituraAgua.objects.update_or_create(
+                    unidade=u, mes=int(despesa.mes), ano=despesa.ano,
+                    defaults={'leitura': atual}
+                )
+            despesa.agua_leituras = {
+                'params': {
+                    'fatura':    fatura,
+                    'm3_total':  m3_total,
+                    'valor_m3':  valor_m3,
+                },
+                'leituras': leituras_agua_anteriores,
+            }
+
+        # === FUNDO DE RESERVA ===
+        elif tipo.nome.lower() == "fundo de reserva":
+            base_tipos = [
+                'Reparos/Reforma', 'Salário - síndico', 'Elevador',
+                'Material Consumo Sem Sala Comercial', 'Material/Serviço de Consumo',
+                'Seguro 6x', 'Energia Áreas Comuns', 'Taxa Lixo',
+                'Água', 'Honorários Contábeis'
+            ]
+            soma = Despesa.objects.filter(
+                tipo__nome__in=base_tipos,
+                mes=despesa.mes,
+                ano=despesa.ano
+            ).aggregate(total=Sum('valor_total'))['total'] or Decimal('0')
+            valor_fundo = soma * Decimal('0.1')
+
+            sala = Unidade.objects.get(nome__icontains='Sala Comercial')
+            pct_sala = Decimal(fracoes_map.get(sala.id, 0))
+            if pct_sala > 1:
+                pct_sala /= Decimal('100')
+            share_sala = (valor_fundo * pct_sala) / Decimal('2')
+
+            valores_por_unidade = { sala: share_sala }
+            restante = valor_fundo - share_sala
+            for unid, pct in fracoes_map.items():
+                if unid == sala.id:
+                    continue
+                pct_dec = Decimal(pct)
+                if pct_dec > 1:
+                    pct_dec /= Decimal('100')
+                unidade = Unidade.objects.get(id=unid)
+                valores_por_unidade[unidade] = restante * pct_dec
+
+            despesa.valor_total = valor_fundo
+            despesa.save()
+            for un, val in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=un, valor=val)
+
+            return redirect('lista_despesas')
+
+        # === ENERGIA SALÃO ===
+        elif tipo.nome.lower() == "energia salão":
+            fatura    = parse_float(request.POST.get('energia_fatura'))
+            kwh_total = parse_float(request.POST.get('energia_kwh_total'), 1)
+            custo_kwh = parse_float(request.POST.get('energia_custo_kwh'))
+            uso_kwh   = parse_float(request.POST.get('energia_uso_kwh'))
+
+            valores_por_unidade = {}
+            for u in unidades:
+                cur1 = parse_float(request.POST.get(f'energia_atual1_{u.id}'))
+                ant1 = leituras_anteriores_energia1[u.id]
+                cur2 = parse_float(request.POST.get(f'energia_atual2_{u.id}'))
+                ant2 = leituras_anteriores_energia2[u.id]
+
+                LeituraEnergia.objects.update_or_create(
+                    unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=1,
+                    defaults={'leitura': cur1}
+                )
+                LeituraEnergia.objects.update_or_create(
+                    unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=2,
+                    defaults={'leitura': cur2}
+                )
+
+                raw_cons = (cur1 - ant1) + (cur2 - ant2)
+                cons     = max(raw_cons, 0)
+                val      = cons * uso_kwh
+                valores_por_unidade[u] = val
+
+            despesa.energia_leituras = {
+                'params': {
+                    'fatura':    fatura,
+                    'kwh_total': kwh_total,
+                    'custo_kwh': custo_kwh,
+                    'uso_kwh':    uso_kwh,
+                },
+                'leituras': {
+                    'anteriores1': leituras_anteriores_energia1,
+                    'anteriores2': leituras_anteriores_energia2,
+                }
+            }
+            despesa.valor_total = sum(valores_por_unidade.values())
+            despesa.save()
+            for u, v in valores_por_unidade.items():
+                if v > 0:
+                    Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+
+            return redirect('lista_despesas')
+
+        # === TAXA BOLETO ===
+        elif tipo.nome.lower() == "taxa boleto":
+            valor_boleto = parse_float(request.POST.get('valor_unico'))
+            for u in unidades:
+                valores_por_unidade[u] = valor_boleto
+                total += valor_boleto
+
+        elif tipo.nome.lower() == "energia áreas comuns":
+            valor_unico = parse_float(request.POST.get('valor_unico'))
+            despesa.valor_total = valor_unico
+            despesa.save()
+
+            sala = Unidade.objects.get(nome__icontains='Sala')
+            pct_sala = fracoes_map[sala.id]
+            if pct_sala > 1:
+                pct_sala /= 100
+
+            share_sala = round(valor_unico * pct_sala / 2, 2)
+            Rateio.objects.create(despesa=despesa, unidade=sala, valor=share_sala)
+
+            restante = valor_unico - share_sala
+            for unid, pct in fracoes_map.items():
+                if unid == sala.id:
+                    continue
+                unidade = Unidade.objects.get(id=unid)
+                if pct > 1:
+                    pct /= 100
+                v = round(restante * pct, 2)
+                Rateio.objects.create(despesa=despesa, unidade=unidade, valor=v)
+
+            return redirect('lista_despesas')
+
+        # === FRAÇÃO (por tipo de despesa) ===
+        elif fracoes_map:
+            valor_unico = parse_float(request.POST.get('valor_unico'))
+            for u in unidades:
+                pct = fracoes_map.get(u.id, 0)
+                v   = valor_unico * pct
+                valores_por_unidade[u] = v
+                total += v
+
+        # === PADRÃO ===
+        else:
+            for u in unidades:
+                v = parse_float(request.POST.get(f'valor_{u.id}'))
+                valores_por_unidade[u] = v
+                total += v
+
+        despesa.valor_total = total
+        despesa.save()
+        for u, v in valores_por_unidade.items():
+            Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+
+        messages.success(request, 'Despesa cadastrada com sucesso!')
+        return redirect('lista_despesas')
+
+    return render(request, 'despesas/nova_despesa.html', {
+        'form':                         form,
+        'unidades':                    unidades,
+        'leituras_anteriores':         leituras_anteriores,
+        'leituras_agua_anteriores':    leituras_agua_anteriores,
+        'recarga_initial':             recarga_initial,
+        'kg_initial':                  kg_initial,
+        'm3kg_initial':                m3kg_initial,
+        'valor_m3_initial':            valor_m3_initial,
+        'agua_fatura_initial':         fatura_initial,
+        'agua_m3_total_initial':       m3total_initial,
+        'agua_valor_m3_initial':       agua_valor_m3_initial,
+        'fatura_energy_initial':       fatura_energy_initial,
+        'kwh_initial':                 kwh_initial,
+        'custo_kwh_initial':           custo_kwh_initial,
+        'leituras_energia_anteriores_med1': leituras_anteriores_energia1,
+        'leituras_energia_anteriores_med2': leituras_anteriores_energia2,
+        'energia_fatura_initial':      fatura_energy_initial,
+        'energia_kwh_total_initial':   kwh_initial,
+        'energia_custo_kwh_initial':   custo_kwh_initial,
+        'energia_uso_kwh_initial':     uso_kwh_initial,
+        'mes':                          mes,
+        'ano':                          ano,
+        'tipo_id':                      tipo_id,
+        'tipo':                         tipo,
+        'fracoes_map':                  fracoes_map,
+    })
+
+@csrf_exempt
+def limpar_rateio(request, despesa_id):
+    if request.method == 'POST':
+        try:
+            desp = Despesa.objects.get(id=despesa_id)
+            Rateio.objects.filter(despesa=desp).delete()
+            desp.valor_total = 0
+            desp.save()
+            return JsonResponse({'success': True})
+        except Despesa.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
+    return JsonResponse({'success': False, 'error': 'Método não permitido'})
+
+@csrf_exempt
+def editar_rateio(request, rateio_id):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            novo_valor = float(data.get('valor', 0))
+            rateio = Rateio.objects.get(id=rateio_id)
+            rateio.valor = novo_valor
+            rateio.save()
+            total = Rateio.objects.filter(despesa=rateio.despesa).aggregate(Sum('valor'))['valor__sum'] or 0
+            rateio.despesa.valor_total = total
+            rateio.despesa.save()
+            return JsonResponse({'success': True, 'novo_total': round(total, 2)})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Método não permitido'})
+
+@csrf_exempt
+def excluir_despesa(request, despesa_id):
+    if request.method == 'POST':
+        try:
+            desp = Despesa.objects.get(id=despesa_id)
+            desp.delete()
+            return JsonResponse({'success': True})
+        except Despesa.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
+    return JsonResponse({'success': False, 'error': 'Método não permitido'})
+
+def ver_rateio(request, despesa_id):
+    despesa = get_object_or_404(Despesa, id=despesa_id)
+    rateios = Rateio.objects.filter(despesa=despesa)
+    total_rateio = rateios.aggregate(total=Sum('valor'))['total'] or 0
+
+    # --- GÁS ---
+    if despesa.tipo.nome.lower() == "gás":
+        gas_leituras = getattr(despesa, 'gas_leituras', {}) or {}
+        gas_params   = gas_leituras.get('params', {})
+        gas_info     = {}
+        mes_atual, ano_atual = int(despesa.mes), despesa.ano
+        if mes_atual > 1:
+            mes_ant, ano_ant = mes_atual - 1, ano_atual
+        else:
+            mes_ant, ano_ant = 12, ano_atual - 1
+        for r in rateios:
+            u   = r.unidade
+            ant = LeituraGas.objects.filter(unidade=u, mes=mes_ant, ano=ano_ant).first()
+            atu = LeituraGas.objects.filter(unidade=u, mes=mes_atual, ano=ano_atual).first()
+            la  = float(ant.leitura) if ant else 0
+            lk  = float(atu.leitura) if atu else 0
+            consumo = max(lk - la, 0)
+            gas_info[u.id] = {
+                'leitura_anterior': la,
+                'leitura_atual':    lk,
+                'consumo':          consumo,
+            }
+        diferenca = float(despesa.valor_total) - float(despesa.recarga or 0)
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':    despesa,
+            'rateios':    rateios,
+            'gas_params': gas_params,
+            'gas_info':   gas_info,
+            'diferenca':  diferenca,
+        })
+
+    # --- ÁGUA ---
+    if despesa.tipo.nome.lower() == "água":
+        agua_leituras = getattr(despesa, 'agua_leituras', {}) or {}
+        agua_params   = agua_leituras.get('params', {})
+        agua_info     = {}
+        mes_atual, ano_atual = int(despesa.mes), despesa.ano
+        if mes_atual > 1:
+            mes_ant, ano_ant = mes_atual - 1, ano_atual
+        else:
+            mes_ant, ano_ant = 12, ano_atual - 1
+        for r in rateios:
+            u   = r.unidade
+            ant = LeituraAgua.objects.filter(unidade=u, mes=mes_ant, ano=ano_ant).first()
+            atu = LeituraAgua.objects.filter(unidade=u, mes=mes_atual, ano=ano_atual).first()
+            la  = float(ant.leitura) if ant else 0
+            lk  = float(atu.leitura) if atu else 0
+            agua_info[u.id] = {
+                'leitura_anterior': la,
+                'leitura_atual':    lk,
+                'consumo':          lk - la,
+            }
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':    despesa,
+            'rateios':    rateios,
+            'agua_params': agua_params,
+            'agua_info':   agua_info,
+        })
+
+    # --- ENERGIA SALÃO ---
+    elif despesa.tipo.nome.lower() == "energia salão":
+        energia_leituras = getattr(despesa, 'energia_leituras', {}) or {}
+        energia_params   = energia_leituras.get('params', {})
+        energia_info     = {}
+        mes_atual, ano_atual = int(despesa.mes), despesa.ano
+        if mes_atual > 1:
+            mes_ant, ano_ant = mes_atual - 1, ano_atual
+        else:
+            mes_ant, ano_ant = 12, ano_atual - 1
+
+        total_leituras = 0
+
+        for rateio in rateios:
+            u = rateio.unidade
+            ant1 = LeituraEnergia.objects.filter(
+                unidade=u, mes=mes_ant, ano=ano_ant, medidor=1
+            ).first()
+            atu1 = LeituraEnergia.objects.filter(
+                unidade=u, mes=mes_atual, ano=ano_atual, medidor=1
+            ).first()
+            ant2 = LeituraEnergia.objects.filter(
+                unidade=u, mes=mes_ant, ano=ano_ant, medidor=2
+            ).first()
+            atu2 = LeituraEnergia.objects.filter(
+                unidade=u, mes=mes_atual, ano=ano_atual, medidor=2
+            ).first()
+
+            la1 = float(ant1.leitura) if ant1 else 0
+            lk1 = float(atu1.leitura) if atu1 else 0
+            la2 = float(ant2.leitura) if ant2 else 0
+            lk2 = float(atu2.leitura) if atu2 else 0
+
+            consumo = (lk1 - la1) + (lk2 - la2)
+            total_leituras += consumo
+            uso   = energia_params.get('uso_kwh', 0.0)
+            valor   = consumo * uso
+
+            energia_info[u.id] = {
+                'unidade': u,
+                'anteriores1': la1,
+                'atuais1':     lk1,
+                'anteriores2': la2,
+                'atuais2':     lk2,
+                'consumo':     consumo,
+                'valor':       valor,
+            }
+
+        energia_total = sum(info['valor'] for info in energia_info.values())
+        despesa.valor_total = energia_total
+
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':        despesa,
+            'rateios':        rateios,
+            'total_rateio':   total_rateio,
+            'energia_params': energia_params,
+            'energia_total':  energia_total,
+            'energia_info':   energia_info,
+            'total_leituras': total_leituras,
+        })
+
+        # --- ENERGIA ÁREAS COMUNS ---
+    elif despesa.tipo.nome.lower() == "energia áreas comuns":
+        # 1) (Opcional) buscar parâmetros de “Energia Salão” para este mês/ano
+        salon = Despesa.objects.filter(
+            tipo__nome__iexact='Energia Salão',
+            mes=despesa.mes,
+            ano=despesa.ano
+        ).order_by('-id').first()
+        if salon and salon.energia_leituras:
+            params = salon.energia_leituras.get('params', {})
+            fatura   = params.get('fatura', 0)
+            uso_kwh  = params.get('uso_kwh',  0)
+        else:
+            fatura = uso_kwh = 0
+
+        # 2) pega diretamente o valor_total salvo no banco
+        valor_areas_comuns = despesa.valor_total
+
+        # 3) (Opcional) se quiser exibir “total_leituras” no template, calcula:
+        total_leituras = 0
+        mes_atual = int(despesa.mes)
+        ano_atual = int(despesa.ano)
+        if mes_atual > 1:
+            mes_ant, ano_ant = mes_atual - 1, ano_atual
+        else:
+            mes_ant, ano_ant = 12, ano_atual - 1
+
+        for u in Unidade.objects.all():
+            ant1 = LeituraEnergia.objects.filter(
+                unidade=u, medidor=1,
+                mes=mes_ant, ano=ano_ant
+            ).first()
+            atu1 = LeituraEnergia.objects.filter(
+                unidade=u, medidor=1,
+                mes=mes_atual, ano=ano_atual
+            ).first()
+            ant2 = LeituraEnergia.objects.filter(
+                unidade=u, medidor=2,
+                mes=mes_ant, ano=ano_ant
+            ).first()
+            atu2 = LeituraEnergia.objects.filter(
+                unidade=u, medidor=2,
+                mes=mes_atual, ano=ano_atual
+            ).first()
+
+            la1 = float(ant1.leitura) if ant1 else 0
+            lk1 = float(atu1.leitura) if atu1 else 0
+            la2 = float(ant2.leitura) if ant2 else 0
+            lk2 = float(atu2.leitura) if atu2 else 0
+
+            total_leituras += (lk1 - la1) + (lk2 - la2)
+
+        # 4) monta a lista de frações para exibir no template:
+        fracoes = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
+        pct_map = {f.unidade.id: Decimal(str(f.percentual)) for f in fracoes}
+
+        sala = Unidade.objects.get(nome__icontains="Sala")
+        pct_sala = pct_map.get(sala.id, Decimal('0'))
+        # Se for maior que 1 (porcentagem em 100-por-cen to), divida por 100:
+        if pct_sala > 1:
+            pct_sala = pct_sala / Decimal('100')
+
+        # Agora faça toda a conta em Decimal:
+        # valor_areas_comuns é Decimal, pct_sala é Decimal, divisor "2" também transformado em Decimal
+        sala_share = (valor_areas_comuns * pct_sala / Decimal('2')).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
+        restante = valor_areas_comuns - sala_share
+
+        fracoes_valores = [{"unidade": sala, "valor": sala_share}]
+        for f in fracoes:
+            if f.unidade.id == sala.id:
+                continue
+            pct = pct_map[f.unidade.id]
+            if pct > 1:
+                pct = pct / Decimal('100')
+            share = (restante * pct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            fracoes_valores.append({"unidade": f.unidade, "valor": share})
+
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':         despesa,
+            'fracoes_valores': fracoes_valores,
+            'input_total':     valor_areas_comuns,  # mostra exatamente o valor_total do Admin
+            'total_leituras':  total_leituras,      # caso queira exibir no template
+        })
+
+    # --- FRAÇÃO ---
+    fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
+    if fracoes_qs.exists():
+        fracoes_valores = [
+            {'unidade': f.unidade, 'valor': round(float(despesa.valor_total) * float(f.percentual), 2)}
+            for f in fracoes_qs
+        ]
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':         despesa,
+            'fracoes_valores': fracoes_valores,
+        })
+
+    # --- PADRÃO ---
+    return render(request, 'despesas/ver_rateio.html', {
+        'despesa': despesa,
+        'rateios': rateios,
+    })
+
+
+def ajax_ultima_agua(request):
+    """
+    Retorna via JSON os params de água do mês anterior para o tipo/mes/ano enviados.
+    """
+    try:
+        tipo_id = int(request.GET.get('tipo'))
+        mes     = int(request.GET.get('mes'))
+        ano     = int(request.GET.get('ano'))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'parâmetros inválidos'}, status=400)
+
+    if mes > 1:
+        mes_ant, ano_ant = mes - 1, ano
+    else:
+        mes_ant, ano_ant = 12, ano - 1
+
+    desp = Despesa.objects.filter(
+        tipo_id=tipo_id,
+        mes=str(mes_ant),
+        ano=ano_ant
+    ).order_by('-id').first()
+
+    data = {'fatura': 0, 'm3_total': 0, 'valor_m3': 0}
+    if desp and desp.agua_leituras and 'params' in desp.agua_leituras:
+        data = desp.agua_leituras['params']
+    return JsonResponse(data)
+
+
+def limpar_tudo(request):
+    # apaga todas as despesas (e cascata todos os rateios)
+    Despesa.objects.all().delete()
+    messages.success(request, "Todas as despesas foram excluídas com sucesso!")
+    return redirect('lista_despesas')

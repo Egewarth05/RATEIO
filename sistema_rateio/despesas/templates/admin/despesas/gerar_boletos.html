@@ -1,0 +1,19 @@
+{# templates/admin/despesas/gerar_boletos.html #}
+{% extends "admin/base_site.html" %}
+{% load static i18n %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <form method="post" style="margin:1em 0;">
+    {% csrf_token %}
+    <div>
+      <label for="{{ form.mes.id_for_label }}">{{ form.mes.label }}</label>
+      {{ form.mes }}
+    </div>
+    <div>
+      <label for="{{ form.ano.id_for_label }}">{{ form.ano.label }}</label>
+      {{ form.ano }}
+    </div>
+    <button type="submit" class="default">{% trans "Gerar boletos" %}</button>
+  </form>
+{% endblock %}

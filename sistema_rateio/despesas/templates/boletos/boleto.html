@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      display: table;
+      margin: 20px auto;
+      padding: 0;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .logo {
+      max-width: 600px;
+      width: 100%;
+      height: auto;
+      display: block;
+      margin: 0 auto 5px;
+    }
+    .info-table {
+      border-collapse: collapse;
+      margin-bottom: 10px;
+      width: auto;
+      table-layout: auto;
+      margin-left: 0;
+      margin-right: 0;
+    }
+    .info-table td {
+      padding: 0;
+      border: none;
+      white-space: nowrap;
+    }
+    .info-table .label {
+      font-weight: bold;
+      padding-right: 5px;
+    }
+    .info-table .value {
+      text-align: left;
+    }
+    .rates {
+      border-collapse: collapse;
+      margin-bottom: 10px;
+      width: auto;
+      table-layout: auto;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .rates th, .rates td {
+      border: 1px solid #000;
+      padding: 6px 8px;
+      white-space: nowrap;
+    }
+    .rates th {
+      background: #f0f0f0;
+      text-align: left;
+    }
+    .right {
+      text-align: right;
+    }
+    .total-row td {
+      font-weight: bold;
+      background: #e0e0e0;
+    }
+    .footer-table {
+      border-collapse: collapse;
+      margin-top: 10px;
+      width: auto;
+      table-layout: auto;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .footer-table th, .footer-table td {
+      text-align: center !important;
+      border: 1px solid #000;
+      padding: 6px 8px;
+      white-space: nowrap;
+    }
+    .footer-table th {
+      background: #f0f0f0;
+      text-align: left;
+    }
+
+    /* nova classe para a logo da contabilidade */
+    .contab-logo {
+      display: block;
+      margin: 1px auto 0;
+      max-width: 100px;
+      width: auto;
+      height: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Logo principal -->
+    <div class="header">
+        <img class="logo"
+        src="img/logo-san-francisco.png"
+        alt="Residencial San Francisco">
+    </div>
+
+    <!-- Info Unidade e Mês/Ano -->
+    <table class="info-table">
+      <tr>
+        <td class="label">Unidade:</td>
+        <td class="value">
+          {% if 'Sala' in unidade.nome %}
+            Sala Comercial {{ unidade.nome|slice:"5:" }}
+          {% else %}
+            Apartamento {{ unidade.nome }}
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td class="label">Mês/Ano:</td>
+        <td class="value">{{ mes|stringformat:"02d" }}/{{ ano }}</td>
+      </tr>
+    </table>
+
+    <!-- Tabela de Rateio -->
+    <table class="rates">
+      <thead>
+        <tr>
+          <th>Descrição</th>
+          <th class="right">Valor (R$)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in lancamentos %}
+          <tr>
+            <td>{{ item.descricao }}</td>
+            <td class="right">
+              {% if item.valor %}
+                {{ item.valor|floatformat:2 }}
+              {% else %}
+                –
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        <tr class="total-row">
+          <td>Total Boleto:</td>
+          <td class="right">{{ total|floatformat:2 }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="footer-table">
+      <thead>
+        <tr>
+          <th>Consumo Gás m³</th>
+          <th>Consumo Água m³</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="right">
+            {% if gas_consumption is not None %}
+              {{ gas_consumption|floatformat:4 }}
+            {% else %}
+              –
+            {% endif %}
+          </td>
+          <td class="right">
+            {% if water_consumption is not None %}
+              {{ water_consumption|floatformat:4 }}
+            {% else %}
+              –
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <!-- Logo da contabilidade, centralizada abaixo -->
+    <img class="contab-logo" src="img/Logo-com-CRC.png" alt="Contabilidade e Consultoria">
+
+  </div>
+</body>
+</html>
