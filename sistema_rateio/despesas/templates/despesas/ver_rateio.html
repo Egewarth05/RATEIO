@@ -10,11 +10,18 @@
 
 {% if despesa.tipo.nome|lower == "energia salão" %}
   <p><strong>Total:</strong> R$ {{ energia_total|floatformat:2 }}</p>
+    <p>
+    <strong>Total Leituras:</strong>
+    {{ total_leituras|floatformat:2 }}
+  </p>
+
 {% else %}
     <p><strong>Total:</strong>
       R$
       {% if input_total is not None %}
         {{ input_total|floatformat:2 }}
+      {% elif total_rateio is not None %}
+        {{ total_rateio|floatformat:2 }}
       {% else %}
         {{ despesa.valor_total|floatformat:2 }}
       {% endif %}
