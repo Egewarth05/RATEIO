@@ -891,15 +891,101 @@ class DespesaAguaAdmin(DespesaBaseAdmin):
     )
 
     def save_model(self, request, obj, form, change):
+        # 1) Marca o tipo como “Água”
         obj.tipo = TipoDespesa.objects.get(nome__iexact='Água')
+
+        # 2) Converte a fatura do form para Decimal e armazena em valor_total
+        raw_fatura = form.cleaned_data.get('fatura') or 0
+        try:
+            fatura_dec = Decimal(str(raw_fatura))
+        except (InvalidOperation, TypeError):
+            fatura_dec = Decimal('0')
+        obj.valor_total = fatura_dec.quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+        # 3) Armazena também os parâmetros no JSONField (se você for usar depois)
         obj.agua_leituras = {
             'params': {
-                'fatura':      float(form.cleaned_data['fatura']     or 0),
-                'm3_total':    float(form.cleaned_data['m3_total']   or 0),
-                'valor_m3_agua': float(form.cleaned_data['valor_m3_agua'] or 0),
+                'fatura':      float(raw_fatura),
+                'm3_total':    float(form.cleaned_data.get('m3_total')   or 0),
+                'valor_m3_agua': float(form.cleaned_data.get('valor_m3_agua') or 0),
             }
         }
+
+        # 4) Salva o objeto “DespesaÁgua” no banco, para termos obj.id disponível
         super().save_model(request, obj, form, change)
+
+        # --------------------------------------------------------
+        # 5) Agora precisamos recriar o Rateio de água para TODAS as unidades
+        # --------------------------------------------------------
+
+        # 5.1) Delete todos os Rateio antigos dessa despesa,
+        #      caso já existam (evita herdar valores negativos).
+        Rateio.objects.filter(despesa=obj).delete()
+
+        # 5.2) Calcule o consumo de cada unidade em m³ (diferença entre leituras).
+        #      Sempre que (leitura_atual < leitura_anterior), trataremos como 0.
+
+        # Determina mês/ano anterior para buscar a leitura de maio/2025
+        mes_atual = int(obj.mes)
+        ano_atual = int(obj.ano)
+        if mes_atual > 1:
+            mes_ant = mes_atual - 1
+            ano_ant = ano_atual
+        else:
+            mes_ant = 12
+            ano_ant = ano_atual - 1
+
+        # Dicionário que vai guardar { unidade_obj: consumo_em_m3 }
+        consumos = {}
+
+        # Primeiro, percorre todas as unidades cadastradas no condomínio
+        for unidade in Unidade.objects.all():
+            # Tenta pegar a leitura de junho de 2025 e a de maio de 2025:
+            leit_atual = LeituraAgua.objects.filter(
+                unidade=unidade,
+                mes=mes_atual,
+                ano=ano_atual
+            ).first()
+            leit_ant = LeituraAgua.objects.filter(
+                unidade=unidade,
+                mes=mes_ant,
+                ano=ano_ant
+            ).first()
+
+            if leit_atual and leit_ant:
+                diff = leit_atual.leitura - leit_ant.leitura
+                consumo_m3 = diff if diff > 0 else Decimal('0')
+            else:
+                consumo_m3 = Decimal('0')
+
+            consumos[unidade] = consumo_m3
+
+        # 5.3) Soma o consumo total de todas as unidades neste mês
+        total_consumo_geral = sum(consumos.values())  # soma só Decimals
+
+        # 5.4) Se houver consumo, calcula o R$ por m³; senão, todo rateio será zero
+        if total_consumo_geral > 0:
+            valor_por_m3 = (fatura_dec / total_consumo_geral).quantize(Decimal('0.0001'), ROUND_HALF_UP)
+        else:
+            # se não houver leitura anterior ou se todas as unidades zeraram,
+            # forçamos rateio zero para todas
+            valor_por_m3 = Decimal('0')
+
+        # 5.5) Cria um Rateio para cada unidade: consumo_unidade × valor_por_m3
+        for unidade, consumo_m3 in consumos.items():
+            # Se quisesse tratar unis que não têm rateio (por exemplo, valor zero),
+            # poderia condicionar:
+            # if consumo_m3 > 0:
+            #     rateio_val = (consumo_m3 * valor_por_m3).quantize(Decimal('0.01'), ROUND_HALF_UP)
+            # else:
+            #     rateio_val = Decimal('0')
+            rateio_val = (consumo_m3 * valor_por_m3).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+            Rateio.objects.create(
+                despesa=obj,
+                unidade=unidade,
+                valor=rateio_val
+            )
 
     def fatura(self, obj):     return obj.fatura_agua or 0
     def m3_total(self, obj):   return obj.m3_total_agua or 0
@@ -1242,7 +1328,19 @@ class BoletoAdmin(admin.ModelAdmin):
                 continue
             valores_fundo[unid] = (restante_fundo * pct).quantize(Decimal('0.01'))
 
-        tipos = TipoDespesa.objects.exclude(nome__iexact='Fundo de Reserva').order_by('nome')
+        tipos = (
+            TipoDespesa.objects
+            .exclude(nome__iexact='Fundo de Reserva')
+            .exclude(nome__iexact='Fatura Energia Elétrica')
+            .order_by('nome')
+        )
+
+        existe_despesa_agua = Despesa.objects.filter(
+            tipo__nome__iexact='Água',
+            mes=str(mes),
+            ano=ano,
+            valor_total__gt=0
+        ).exists()
 
         # 6) gera um PDF por unidade
         for unidade in Unidade.objects.order_by('nome'):
@@ -1321,14 +1419,25 @@ class BoletoAdmin(admin.ModelAdmin):
             else:
                 consumo_gas = 0
 
-            # 6.5) consumo de água
-            consumo_agua = None
-            atual_agua = LeituraAgua.objects.filter(unidade=unidade, mes=mes, ano=ano).first()
-            if atual_agua:
-                ant = LeituraAgua.objects.filter(
-                    unidade=unidade, mes=mes_ant, ano=ano_ant
+            if existe_despesa_agua:
+                atual_agua = LeituraAgua.objects.filter(unidade=unidade, mes=mes, ano=ano).first()
+                ant_agua   = LeituraAgua.objects.filter(unidade=unidade, mes=mes_ant, ano=ano_ant).first()
+                if atual_agua and ant_agua:
+                    diff_wa = atual_agua.leitura - ant_agua.leitura
+                    consumo_agua = diff_wa if diff_wa > 0 else 0
+                else:
+                    consumo_agua = 0
+
+                rateio_agua = Rateio.objects.filter(
+                    despesa__tipo__nome__iexact='Água',
+                    despesa__mes=str(mes),
+                    despesa__ano=ano,
+                    unidade=unidade
                 ).first()
-                consumo_agua = atual_agua.leitura - (ant.leitura if ant else 0)
+                valor_agua = rateio_agua.valor if (rateio_agua and rateio_agua.valor > 0) else None
+            else:
+                consumo_agua = None
+                valor_agua = None
 
             # 6.6) soma final e geração do PDF
             total_boleto = sum(
@@ -1614,28 +1723,54 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         gas_map = {}
         agua_map = {}
         for un in df_exib_un.columns:
-            rateio = Rateio.objects.filter(
+
+            rateio_gas = Rateio.objects.filter(
                 despesa__tipo__nome__iexact='Gás',
                 despesa__mes=str(mes),
                 despesa__ano=ano,
                 unidade__nome=un
             ).first()
 
-            if rateio and rateio.valor > Decimal('0'):
-                atual = LeituraGas.objects.filter(unidade__nome=un, mes=mes, ano=ano).first()
-                ant   = LeituraGas.objects.filter(unidade__nome=un, mes=prev_mes, ano=prev_ano).first()
-                if atual and ant:
-                    diff = atual.leitura - ant.leitura
-                    gas_map[un] = diff if diff > 0 else 0
+            if rateio_gas and rateio_gas.valor > Decimal('0'):
+                atual_gas = LeituraGas.objects.filter(unidade__nome=un, mes=mes, ano=ano).first()
+                ant_gas   = LeituraGas.objects.filter(unidade__nome=un, mes=prev_mes, ano=prev_ano).first()
+                if atual_gas and ant_gas:
+                    diff_g = atual_gas.leitura - ant_gas.leitura
+                    gas_map[un] = diff_g if diff_g > 0 else 0
                 else:
                     gas_map[un] = 0
             else:
                 gas_map[un] = 0
 
+            rateio_agua = Rateio.objects.filter(
+                despesa__tipo__nome__iexact='Água',
+                despesa__mes=str(mes),
+                despesa__ano=ano,
+                unidade__nome=un
+            ).first()
+
+            if rateio_agua and rateio_agua.valor > Decimal('0'):
+                atual_agua = LeituraAgua.objects.filter(unidade__nome=un, mes=mes,     ano=ano).first()
+                ant_agua   = LeituraAgua.objects.filter(unidade__nome=un, mes=prev_mes, ano=prev_ano).first()
+                # Só subtrai se TIVER leituras atual e anterior
+                if atual_agua and ant_agua:
+                    diff_wa = atual_agua.leitura - ant_agua.leitura
+                    agua_map[un] = diff_wa if diff_wa > 0 else 0
+                else:
+                    # Se não existir leitura atual OU não existir anterior, zera
+                    agua_map[un] = 0
+            else:
+                # Se não há rateio de água para esta unidade, força 0
+                agua_map[un] = 0
+
             # água
             atual_a = LeituraAgua.objects.filter(unidade__nome=un, mes=mes,     ano=ano).first()
             ant_a   = LeituraAgua.objects.filter(unidade__nome=un, mes=prev_mes, ano=prev_ano).first()
-            agua_map[un] = (atual_a.leitura - ant_a.leitura) if atual_a and ant_a else 0
+            if atual_a and ant_a:
+                diff = atual_a.leitura - ant_a.leitura
+                agua_map[un] = diff if diff > 0 else 0
+            else:
+                agua_map[un] = 0
 
         # adiciona as linhas no final
         df_exib_un.loc['TOTAL BOLETO']    = df_exib_un.sum(axis=0)
