@@ -217,7 +217,7 @@
           cField.value = vField.value = '';
           tdC.style.display = tdV.style.display = 'none';
         } else {
-          const cur  = parseFloat(raw.replace(',', '.'))||0;
+          const cur  = parseFloat(rawCur) || 0;
           const ant  = parseFloat(anterior.value.replace(',', '.')) || 0;
           const diff = cur - ant;
           const cons = diff > 0 ? diff : 0;
@@ -771,7 +771,7 @@
         const cons= cur-ant;
         cField.value=cons.toFixed(3);
         const rate= parseFloat(ar.value.replace(',', '.'))||0;
-        vField.value=(cons*rate).toFixed(2).replace(',', '.');
+        vField.value=(cons*rate).toFixed(2).replace('.', ',');
         tdC.style.display=''; tdV.style.display='';
       }
       inp.addEventListener('input', refreshRow);
