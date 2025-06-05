@@ -57,6 +57,7 @@ def lista_despesas(request):
         .filter(
             Q(total_rateado__gt=0)
             | Q(tipo__nome__iexact='Energia Áreas Comuns')
+            | Q(tipo__nome__iexact='Fatura Energia Elétrica')
         )
     )
 
@@ -243,6 +244,13 @@ def nova_despesa(request):
         for uid in leituras_anteriores_energia1
     }
 
+    tipo_obj = None
+    if tipo_id:
+        try:
+            tipo_obj = TipoDespesa.objects.get(pk=tipo_id)
+        except TipoDespesa.DoesNotExist:
+            tipo_obj = None
+
     # se for GET, renderiza o form com todos os iniciais
     if request.method != 'POST':
         return render(request, 'despesas/nova_despesa.html', {
@@ -265,6 +273,7 @@ def nova_despesa(request):
             'energia_uso_kwh_initial':      uso_kwh_initial,
             'mes':                           mes,
             'ano':                           ano,
+            'tipo_obj':                     tipo_obj,
             'tipo_id':                       tipo_id,
             'tipo':                          tipo,
             'fracoes_map':                   fracoes_map,
@@ -471,6 +480,12 @@ def nova_despesa(request):
                 share = (restante * pct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 Rateio.objects.create(despesa=despesa, unidade=f.unidade, valor=share)
 
+            return redirect('lista_despesas')
+
+        # === FATURA ENERGIA ELÉTRICA ===
+        elif tipo.nome.lower() == "fatura energia elétrica":
+            despesa.valor_total = parse_float(request.POST.get('valor_unico', 0))
+            despesa.save()
             return redirect('lista_despesas')
 
         # === TAXA BOLETO ===
