@@ -203,6 +203,8 @@ def nova_despesa(request):
             fatura_energy_initial = float(fatura_eletrica.valor_total)
         except Exception:
             fatura_energy_initial = 0
+    else:
+        fatura_energy_initial = 0
 
     # parâmetros de GÁS do mês anterior
     ultima_gas = Despesa.objects.filter(
