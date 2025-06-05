@@ -610,7 +610,7 @@
       'material/serviço de consumo',
       'taxa boleto',
       'seguro 6x',
-      'honorários contábeis'
+      'honorários contábeis',
       'fatura energia elétrica'
     ];
 
@@ -745,7 +745,7 @@
     // --- Água ---
     function atualizaRate(){
       const f = parseFloat(af.value.replace(',', '.'))||0;
-      const m = parseFloat(at.value.replace(',', '.'))||0;0,00
+      const m = parseFloat(at.value.replace(',', '.')) || 0;
       ar.value = m ? (f/m).toFixed(2).replace('.', ',') : '';
     }
     af.addEventListener('input', atualizaRate);
@@ -771,7 +771,7 @@
         const cons= cur-ant;
         cField.value=cons.toFixed(3);
         const rate= parseFloat(ar.value.replace(',', '.'))||0;
-        vField.value=(cons*rate).toFixed(2).replace(',', ',');
+        vField.value=(cons*rate).toFixed(2).replace(',', '.');
         tdC.style.display=''; tdV.style.display='';
       }
       inp.addEventListener('input', refreshRow);
