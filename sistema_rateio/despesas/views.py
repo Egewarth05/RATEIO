@@ -188,6 +188,22 @@ def nova_despesa(request):
         kwh_initial             = params.get('kwh_total', 1)
         custo_kwh_initial       = params.get('custo_kwh', 0)
 
+    fatura_eletrica = (
+        Despesa.objects
+        .filter(
+            tipo__nome__iexact='Fatura Energia Elétrica',
+            mes=str(mes),
+            ano=ano
+        )
+        .order_by('-id')
+        .first()
+    )
+    if fatura_eletrica:
+        try:
+            fatura_energy_initial = float(fatura_eletrica.valor_total)
+        except Exception:
+            fatura_energy_initial = 0
+
     # parâmetros de GÁS do mês anterior
     ultima_gas = Despesa.objects.filter(
         tipo=tipo, mes=str(mes_ant), ano=ano_ant
