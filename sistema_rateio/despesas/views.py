@@ -53,12 +53,7 @@ def lista_despesas(request):
 
     despesas = (
         qs
-        .annotate(total_rateado=Sum('rateio__valor'))
-        .filter(
-            Q(total_rateado__gt=0)
-            | Q(tipo__nome__iexact='Energia Áreas Comuns')
-            | Q(tipo__nome__iexact='Fatura Energia Elétrica')
-        )
+        .filter(valor_total__gt=0)
     )
 
     # AQUI: para **todos** os objetos, usamos valor_total como valor_exibido.
