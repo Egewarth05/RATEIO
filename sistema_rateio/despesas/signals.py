@@ -3,6 +3,7 @@ from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
+from collections import defaultdict
 from django.db.models import Sum
 from .models import (
     Despesa,
@@ -186,20 +187,21 @@ def criar_energia_areas_comuns(sender, instance, created, **kwargs):
     if instance.tipo.nome.lower() != 'energia salão':
         return
 
+    # 2) Converte mes/ano para int (caso dê erro, aborta)
     try:
         mes_int = int(instance.mes)
         ano_int = int(instance.ano)
     except (TypeError, ValueError):
-        # Se não conseguir converter mês/ano, aborta
         return
 
-    # 2) Garante que exista o tipo 'Energia Áreas Comuns'
+    # 3) Garante que exista o TipoDespesa “Energia Áreas Comuns”
+    #    (busca por __iexact para não duplicar)
     tipo_ac, _ = TipoDespesa.objects.get_or_create(
         nome__iexact='Energia Áreas Comuns',
         defaults={'nome': 'Energia Áreas Comuns'}
     )
 
-    # 3) Extrai do JSONField 'energia_leituras' o valor de fatura e o custo_kwh
+    # 4) Extrai do JSONField de Energia Salão os parâmetros “fatura” e “custo_kwh”
     params = instance.energia_leituras.get('params', {}) if instance.energia_leituras else {}
     try:
         fatura = Decimal(str(params.get('fatura', 0)))
@@ -210,38 +212,23 @@ def criar_energia_areas_comuns(sender, instance, created, **kwargs):
     except:
         custo_kwh = Decimal('0')
 
-    # 4) Calcula o total de consumo (kWh) no mês/ano: para cada LeituraEnergia,
-    #    faz (leitura_atual – leitura_anterior) e soma tudo.
-    total_consumo = Decimal('0')
-    leituras_atuais = LeituraEnergia.objects.filter(mes=mes_int, ano=ano_int)
+    # 5) Soma todas as “leituras” do mês atual (cada leitura.leitura já é o consumo daquele medidor)
+    total_leituras = Decimal('0')
+    # Basta somar cada objeto LeituraEnergia deste mes/ano:
+    for leitura in LeituraEnergia.objects.filter(mes=mes_int, ano=ano_int):
+        total_leituras += Decimal(leitura.leitura)
 
-    for leitura in leituras_atuais:
-        # determina mês/ano anterior
-        if mes_int > 1:
-            mes_ant, ano_ant = mes_int - 1, ano_int
-        else:
-            mes_ant, ano_ant = 12, ano_int - 1
+    # Arredonda o total de leituras para 2 casas
+    total_leituras = total_leituras.quantize(Decimal('0.01'), ROUND_HALF_UP)
 
-        anterior = LeituraEnergia.objects.filter(
-            unidade=leitura.unidade,
-            medidor=leitura.medidor,
-            mes=mes_ant,
-            ano=ano_ant
-        ).first()
+    # 6) Calcula o valor total de Áreas Comuns:
+    #    valor_ac = fatura – (custo_kwh × total_leituras)
+    valor_ac = (
+        (fatura - (total_leituras * custo_kwh))
+        .quantize(Decimal('0.01'), ROUND_HALF_UP)
+    )
 
-        if anterior:
-            # diferença entre leitura atual e anterior
-            diff = Decimal(leitura.leitura) - Decimal(anterior.leitura)
-            # se houver leitura anterior, soma a diferença
-            total_consumo += max(diff, Decimal('0'))
-
-    # quantiza para duas casas decimais
-    total_consumo = total_consumo.quantize(Decimal('0.01'), ROUND_HALF_UP)
-
-    # 5) Aplica a fórmula: Valor Áreas Comuns = fatura – (total_consumo * custo_kwh)
-    valor_ac = (fatura - (total_consumo * custo_kwh)).quantize(Decimal('0.01'), ROUND_HALF_UP)
-
-    # 6) Cria ou atualiza o registro de Despesa 'Energia Áreas Comuns' para o mesmo mês/ano
+    # 7) Cria ou atualiza a Despesa “Energia Áreas Comuns” deste mês/ano
     with transaction.atomic():
         desp_ac, criado_ac = Despesa.objects.update_or_create(
             tipo=tipo_ac,
@@ -252,13 +239,55 @@ def criar_energia_areas_comuns(sender, instance, created, **kwargs):
                 'valor_total': valor_ac,
             }
         )
-
-        # 7) (Opcional) Guarda os parâmetros no JSONField 'energia_leituras' de 'desp_ac'
+        # (opcional) armazena total_leituras no JSONField da própria desp_ac,
+        #    para histórico/facilitar debug:
         desp_ac.energia_leituras = {
             'params': {
                 'fatura':         float(fatura),
                 'custo_kwh':      float(custo_kwh),
-                'total_leituras': float(total_consumo),
+                'total_leituras': float(total_leituras),
             }
         }
         desp_ac.save(update_fields=['energia_leituras'])
+
+        # 8) Limpa quaisquer Rateios antigos desta despesa de Áreas Comuns
+        Rateio.objects.filter(despesa=desp_ac).delete()
+
+        # 9) Busca TODAS as frações cadastradas para “Energia Áreas Comuns”:
+        #    cada FracaoPorTipoDespesa tem `.unidade` e `.percentual`
+        frac_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_ac)
+
+        # 10) Monta mapa { unidade: percentual_normalizado }
+        pct_map = {}
+        for f in frac_qs:
+            pct = Decimal(f.percentual)
+            # se o admin guardou “10” em vez de “0.10”, divide por 100
+            if pct > 1:
+                pct /= Decimal('100')
+            pct_map[f.unidade] = pct
+
+        # 11) Identifica se há alguma “Sala” para aplicar meia-cota
+        sala = next((u for u in pct_map if u.nome.lower().startswith('sala')), None)
+
+        # 12) Calcula quanto a Sala deve pagar (metade da parte dela):
+        if sala:
+            pct_sala = pct_map[sala]
+            # metade da cota normal da Sala
+            share_sala = (valor_ac * pct_sala / Decimal('2')).quantize(Decimal('0.01'), ROUND_HALF_UP)
+            restante = (valor_ac - share_sala).quantize(Decimal('0.01'), ROUND_HALF_UP)
+        else:
+            share_sala = Decimal('0')
+            restante = valor_ac
+
+        # 13) Agora cria Rateio para cada unidade de pct_map:
+        for unidade_obj, pct in pct_map.items():
+            if sala and unidade_obj == sala:
+                valor_unitario = share_sala
+            else:
+                valor_unitario = (restante * pct).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+            Rateio.objects.create(
+                despesa=desp_ac,
+                unidade=unidade_obj,
+                valor=valor_unitario
+            )

@@ -404,18 +404,206 @@ class DespesaAreasComunsAdmin(admin.ModelAdmin):
         'total_leituras',
     )
     readonly_fields = (
-        'mes', 'ano', 'valor_total',
-        'energia_fatura', 'custo_kwh', 'total_leituras',
+        'mes', 'ano', 'valor_exibido_admin',
+        'energia_fatura', 'custo_kwh', 'total_leituras', 'rateio_html',
     )
     fieldsets = (
         (None, {
-            'fields': ('mes', 'ano', 'valor_total'),
+            'fields': ('mes', 'ano', 'valor_exibido_admin',),
         }),
         ('Parâmetros de Áreas Comuns', {
             'fields': ('energia_fatura', 'custo_kwh', 'total_leituras'),
             'description': 'Dados vindos da Energia Salão + cálculo de consumo',
         }),
+        ('Rateio por Fração (só leitura)', {
+            'fields': ('rateio_html',),
+        }),
     )
+
+    @admin.display(description='Valor Total (Áreas Comuns)')
+    def valor_bruto_db(self, obj):
+        """
+        Retorna exatamente o que está gravado em obj.valor_total (o valor “319,55”).
+        """
+        # Se quiser formatar em “R$ 319,55”:
+        return f"R$ {obj.valor_total:.2f}".replace('.', ',')
+
+    @admin.display(description='Valor Total (Áreas Comuns)')
+    def valor_calculado(self, obj):
+        """
+        Continua aqui apenas para o change form (se você quiser recalcular),
+        mas **não** será usado no list_display.
+        """
+        # 1) pega fatura e custo do JSON
+        raw_fatura = obj.energia_fatura     or 0
+        raw_custo  = obj.custo_kwh          or 0
+        try:
+            fatura = Decimal(str(raw_fatura))
+        except:
+            fatura = Decimal('0')
+        try:
+            custo = Decimal(str(raw_custo))
+        except:
+            custo = Decimal('0')
+
+        # 2) soma total kWh do mês/ano
+        try:
+            mes_int = int(obj.mes)
+            ano_int = int(obj.ano)
+            agregado = LeituraEnergia.objects.filter(
+                mes=mes_int, ano=ano_int
+            ).aggregate(total=Sum('leitura'))
+            total_kwh = agregado.get('total') or Decimal('0')
+        except:
+            total_kwh = Decimal('0')
+
+        # 3) faz o cálculo
+        valor_corrigido = (fatura - (custo * total_kwh)).quantize(Decimal('0.01'), ROUND_HALF_UP)
+        return valor_corrigido
+
+
+    def valor_exibido_admin(self, obj):
+        """
+        Exibe, no change form, o valor corrigido (fatura - custo × total_kwh), formatado como “R$ xx,xx”
+        """
+        # Repetimos o cálculo do método anterior e só formatamos
+        raw_fatura = obj.energia_fatura     or 0
+        raw_custo  = obj.custo_kwh          or 0
+        try:
+            fatura = Decimal(str(raw_fatura))
+        except:
+            fatura = Decimal('0')
+        try:
+            custo = Decimal(str(raw_custo))
+        except:
+            custo = Decimal('0')
+
+        try:
+            mes_int = int(obj.mes)
+            ano_int = int(obj.ano)
+            agregado = LeituraEnergia.objects.filter(
+                mes=mes_int, ano=ano_int
+            ).aggregate(total=Sum('leitura'))
+            total_kwh = agregado.get('total') or Decimal('0')
+        except:
+            total_kwh = Decimal('0')
+
+        valor_corrigido = (fatura - (custo * total_kwh)).quantize(Decimal('0.01'), ROUND_HALF_UP)
+        texto = f"R$ {valor_corrigido:.2f}".replace('.', ',')
+        return format_html("<strong>{}</strong>", texto)
+
+    valor_exibido_admin.short_description = "Valor Total"
+
+    def rateio_html(self, obj):
+        """
+        Retorna em HTML a tabela de Rateio por Fração, DISTRIBUINDO
+        sobre o MESMO valor corrigido usado em `valor_exibido_admin`.
+        """
+        # 1) Primeiro, calculamos novamente o "valor corrigido":
+        raw_fatura = obj.energia_fatura or 0
+        raw_custo  = obj.custo_kwh    or 0
+
+        try:
+            fatura = Decimal(str(raw_fatura))
+        except:
+            fatura = Decimal('0')
+        try:
+            custo = Decimal(str(raw_custo))
+        except:
+            custo = Decimal('0')
+
+        try:
+            mes_int = int(obj.mes)
+            ano_int = int(obj.ano)
+            agregado = (
+                LeituraEnergia.objects
+                .filter(mes=mes_int, ano=ano_int)
+                .aggregate(total=Sum('leitura'))
+            )
+            total_kwh = agregado.get('total') or Decimal('0')
+        except:
+            total_kwh = Decimal('0')
+
+        valor_corrigido = (fatura - (custo * total_kwh)).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+        # 2) Carrega todas as frações para este tipo de despesa:
+        fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=obj.tipo)
+
+        # 3) Monta um dicionário { unidade.id: percentual_decimal }
+        pct_map = {
+            f.unidade.id: Decimal(str(f.percentual))
+            for f in fracoes_qs
+        }
+
+        # 4) Identifica a “Sala” (unidade com nome contendo 'Sala')
+        try:
+            sala = Unidade.objects.get(nome__icontains='Sala')
+            pct_sala = pct_map.get(sala.id, Decimal('0'))
+        except Unidade.DoesNotExist:
+            sala = None
+            pct_sala = Decimal('0')
+
+        # Se o percentual estiver em '20' (exemplo de 20%), converta para 0.20:
+        if pct_sala > 1:
+            pct_sala = pct_sala / Decimal('100')
+
+        # 5) Calcula metade da cota da Sala:
+        sala_share = (valor_corrigido * pct_sala / Decimal('2')).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+        # 6) O restante a dividir entre as outras unidades:
+        restante = (valor_corrigido - sala_share).quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+        # 7) Monta lista de linhas:
+        linhas = []
+
+        # 7a) Sala primeiro, se existir:
+        if sala:
+            linhas.append({
+                'nome': sala.nome,
+                'valor': sala_share,
+            })
+
+        # 7b) Para cada outra fração:
+        for f in fracoes_qs:
+            u = f.unidade
+            if sala and u.id == sala.id:
+                continue
+            pct_i = Decimal(str(f.percentual))
+            if pct_i > 1:
+                pct_i = pct_i / Decimal('100')
+            share_i = (restante * pct_i).quantize(Decimal('0.01'), ROUND_HALF_UP)
+            linhas.append({
+                'nome': u.nome,
+                'valor': share_i,
+            })
+
+        # 8) Constrói uma mini-tabela HTML:
+        html = ['<table style="width:100%; border-collapse: collapse; margin-top:8px;">']
+        html.append(
+            '<thead>'
+            '  <tr>'
+            '    <th style="border: 1px solid #444; padding: 4px; text-align:left;">Unidade</th>'
+            '    <th style="border: 1px solid #444; padding: 4px; text-align:right;">Valor (R$)</th>'
+            '  </tr>'
+            '</thead>'
+            '<tbody>'
+        )
+
+        for linha in linhas:
+            nome = linha['nome']
+            val  = linha['valor']
+            val_str = f"{val:.2f}".replace('.', ',')
+            html.append(
+                f'<tr>'
+                f'  <td style="border: 1px solid #444; padding: 4px;">{nome}</td>'
+                f'  <td style="border: 1px solid #444; padding: 4px; text-align:right;">R$ {val_str}</td>'
+                f'</tr>'
+            )
+
+        html.append('</tbody></table>')
+        return format_html(''.join(html))
+
+    rateio_html.short_description = "Rateio por Fração"
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -437,9 +625,13 @@ class DespesaAreasComunsAdmin(admin.ModelAdmin):
 
     @admin.display(description='Custo por kWh (R$)')
     def custo_kwh(self, obj):
+        # força buscar sempre a despesa "Energia Salão" daquele mês/ano:
         energia = DespesaEnergia.objects.filter(
-            mes=obj.mes, ano=obj.ano
+            mes=obj.mes,
+            ano=obj.ano,
+            tipo__nome__iexact='Energia Salão'
         ).order_by('-id').first()
+
         if not energia or not energia.energia_leituras:
             return Decimal('0.00')
         raw = energia.energia_leituras['params'].get('custo_kwh', 0)
@@ -475,30 +667,43 @@ class DespesaAreasComunsAdmin(admin.ModelAdmin):
     def valor_calculado(self, obj):
         """
         Retorna: Fatura da Energia Salão − (Custo kWh × Total Leituras),
-        formatado em R$ com duas casas decimais.
+        sem formatação (para que possamos exibir em list_display se quisermos).
         """
-        # 1) pega a fatura (Decimal)
-        fatura = self.energia_fatura(obj)
-        # 2) pega o custo por kWh (Decimal)
-        custo = self.custo_kwh(obj)
-        # 3) pega total de kWh consumido (Decimal)
-        total_kwh = self.total_leituras(obj)
 
-        # Garante que todos sejam Decimals válidos:
+        # 1) consulta o parâmetro "Energia Salão" daquele mês/ano
+        energia = DespesaEnergia.objects.filter(
+            mes=obj.mes,
+            ano=obj.ano,
+            tipo__nome__iexact='Energia Salão'
+        ).order_by('-id').first()
+
+        if not energia or not energia.energia_leituras:
+            return Decimal('0.00')
+
+        params = energia.energia_leituras.get('params', {})
         try:
-            fatura = Decimal(fatura)
+            fatura = Decimal(str(params.get('fatura', 0))).quantize(Decimal('0.01'), ROUND_HALF_UP)
         except:
-            fatura = Decimal('0')
+            fatura = Decimal('0.00')
         try:
-            custo = Decimal(custo)
+            custo = Decimal(str(params.get('custo_kwh', 0))).quantize(Decimal('0.01'), ROUND_HALF_UP)
         except:
-            custo = Decimal('0')
+            custo = Decimal('0.00')
+
+        # 2) soma total kWh do mês/ano
         try:
-            total_kwh = Decimal(total_kwh)
+            mes_int = int(obj.mes)
+            ano_int = int(obj.ano)
+            agregado = (
+                LeituraEnergia.objects
+                .filter(mes=mes_int, ano=ano_int)
+                .aggregate(total=Sum('leitura'))
+            )
+            total_kwh = agregado.get('total') or Decimal('0')
         except:
             total_kwh = Decimal('0')
 
-        # Cálculo final e formatação:
+        # 3) faz o cálculo: fatura − (custo × total_kwh)
         resultado = (fatura - (custo * total_kwh)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         return resultado
 

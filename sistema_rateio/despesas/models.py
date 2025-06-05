@@ -96,6 +96,42 @@ class Despesa(models.Model):
     agua_leituras= JSONField("Leituras de Água", blank=True, null=True)
     energia_leituras = JSONField("Leituras de Energia", blank=True, null=True)
 
+    @property
+    def total_leituras(self):
+        if self.tipo.nome.lower() != 'energia salão':
+            return None
+
+        try:
+            mes_int = int(self.mes)
+            ano_int = int(self.ano)
+        except (TypeError, ValueError):
+            return None
+
+        # calcula mês/ano anterior
+        if mes_int > 1:
+            mes_ant, ano_ant = mes_int - 1, ano_int
+        else:
+            mes_ant, ano_ant = 12, ano_int - 1
+
+        total = 0
+        from .models import LeituraEnergia, Unidade
+
+        for u in Unidade.objects.all():
+            for medidor in (1, 2):
+                ant = LeituraEnergia.objects.filter(
+                    unidade=u, medidor=medidor,
+                    mes=mes_ant, ano=ano_ant
+                ).first()
+                atu = LeituraEnergia.objects.filter(
+                    unidade=u, medidor=medidor,
+                    mes=mes_int, ano=ano_int
+                ).first()
+                la = float(ant.leitura) if ant else 0
+                lk = float(atu.leitura) if atu else 0
+                total += (lk - la)
+
+        return round(total, 4)
+
     def __str__(self):
         # Exemplo: "Energia Salão – 05/2025"
         return f"{self.tipo.nome} – {self.mes}/{self.ano}"
@@ -161,6 +197,56 @@ class Despesa(models.Model):
         if self.agua_leituras and 'params' in self.agua_leituras:
             return (self.agua_leituras or {}).get('params', {}).get('valor_m3_agua')
         return None
+
+class DespesaAreasComuns(Despesa):
+    class Meta:
+        proxy = True
+        verbose_name = "Energia Áreas Comuns"
+        verbose_name_plural = "Energia Áreas Comuns"
+
+    def save(self, *args, **kwargs):
+        """
+        Antes de salvar, busca a última DespesaEnergia
+        (que contém o fatura e o custo_kwh) e recalcula valor_total.
+        """
+        # 1) pega a última DespesaEnergia para o mesmo mês/ano
+        en = DespesaEnergia.objects.filter(
+            mes=self.mes,
+            ano=self.ano
+        ).order_by('-id').first()
+
+        if en and en.energia_leituras:
+            params = en.energia_leituras.get('params', {})
+            raw_fatura = params.get('fatura', 0)
+            raw_custo  = params.get('custo_kwh', 0)
+            try:
+                fatura = Decimal(str(raw_fatura))
+            except:
+                fatura = Decimal('0')
+            try:
+                custo = Decimal(str(raw_custo))
+            except:
+                custo = Decimal('0')
+            # 2) soma todas as leituras de energia do mês/ano
+            total_kwh = (
+                LeituraEnergia.objects
+                .filter(mes=int(self.mes), ano=int(self.ano))
+                .aggregate(total=Sum('leitura'))
+                .get('total') or Decimal('0')
+            )
+            total_kwh = Decimal(total_kwh)
+            # 3) recalcula o valor_total
+            self.valor_total = (fatura - (custo * total_kwh)).quantize(Decimal('0.01'))
+        else:
+            # Se não houver registro de DespesaEnergia, zera
+            self.valor_total = Decimal('0.00')
+
+        # 4) força o tipo correto (caso tenha criado manualmente)
+        from .models import TipoDespesa
+        self.tipo = TipoDespesa.objects.get(nome__iexact='Energia Áreas Comuns')
+
+        # 5) chame o save padrão do Django
+        super().save(*args, **kwargs)
 
 class DespesaEnergia(Despesa):
     class Meta:
@@ -270,6 +356,7 @@ class ParametroEnergia(models.Model):
     uso_kwh    = models.DecimalField("R$ Uso kWh",   max_digits=12, decimal_places=4)
 
     class Meta:
+        unique_together = ('mes', 'ano')
         verbose_name = "Parâmetro de Energia"
         verbose_name_plural = "Parâmetros de Energia"
 

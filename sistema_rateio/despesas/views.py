@@ -577,6 +577,127 @@ def ver_rateio(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
     rateios = Rateio.objects.filter(despesa=despesa)
     total_rateio = rateios.aggregate(total=Sum('valor'))['total'] or 0
+    valor_exibido = despesa.valor_total
+
+    if despesa.tipo.nome.lower() == 'energia áreas comuns':
+        # 1) pega fatura e custo_kwh da última “Energia Salão” desse mês/ano
+        energia = (
+            Despesa.objects
+            .filter(
+                mes=str(int(despesa.mes)),
+                ano=despesa.ano,
+                tipo__nome__iexact='Energia Salão'
+            )
+            .order_by('-id')
+            .first()
+        )
+
+        if energia and energia.energia_leituras:
+            params = energia.energia_leituras.get('params', {})
+            raw_fatura = params.get('fatura', 0)
+            raw_custo  = params.get('custo_kwh', 0)
+        else:
+            raw_fatura = 0
+            raw_custo  = 0
+
+        try:
+            fatura = Decimal(str(raw_fatura))
+        except Exception:
+            fatura = Decimal('0')
+        try:
+            custo = Decimal(str(raw_custo))
+        except Exception:
+            custo = Decimal('0')
+
+        # 2) soma todas as leituras (kWh) do mês/ano em LeituraEnergia
+        try:
+            mes_int = int(despesa.mes)
+            ano_int = int(despesa.ano)
+            agregado = (
+                LeituraEnergia.objects
+                .filter(mes=mes_int, ano=ano_int)
+                .aggregate(total=Sum('leitura'))
+            )
+            total_kwh = agregado.get('total') or Decimal('0')
+        except Exception:
+            total_kwh = Decimal('0')
+
+        # 3) calcula o valor que será rateado:
+        valor_exibido = (
+            fatura - (custo * total_kwh)
+        ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        # 4) busca todas as frações cadastradas para “Energia Áreas Comuns”
+        fracoes_qs = FracaoPorTipoDespesa.objects.filter(
+            tipo_despesa=despesa.tipo
+        )
+
+        # 5) cria um dicionário { unidade.id: percentual_decimal }
+        #    assumindo que o campo “percentual” está em formato 0.xx ou xx (%, que dividiremos por 100 abaixo)
+        pct_map = {
+            f.unidade.id: Decimal(str(f.percentual))
+            for f in fracoes_qs
+        }
+
+        # 6) identifica a Sala (unidade cujo nome contenha “Sala”)
+        try:
+            sala = Unidade.objects.get(nome__icontains='Sala')
+            pct_sala = pct_map.get(sala.id, Decimal('0'))
+        except Unidade.DoesNotExist:
+            sala = None
+            pct_sala = Decimal('0')
+
+        # Se o percentual estiver armazenado como “26.40” em vez de “0.2640”, converta:
+        if pct_sala > 1:
+            pct_sala = pct_sala / Decimal('100')
+
+        # 7) faz a metade da cota da Sala
+        sala_share = (valor_exibido * pct_sala / Decimal('2')).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
+
+        # 8) o que resta para distribuir entre os demais
+        restante = (valor_exibido - sala_share).quantize(
+            Decimal('0.01'),
+            rounding=ROUND_HALF_UP
+        )
+
+        # 9) monta a lista de resultados
+        fracoes_valores = []
+
+        # 9a) primeiro adiciona a Sala com “metade da fração”
+        if sala:
+            fracoes_valores.append({
+                'unidade': sala,
+                'valor': float(sala_share),
+            })
+
+        # 9b) para cada outra unidade (que não seja a Sala), dá o share proporcional
+        for f in fracoes_qs:
+            u = f.unidade
+            if sala and u.id == sala.id:
+                continue
+
+            pct_i = Decimal(str(f.percentual))
+            if pct_i > 1:
+                pct_i = pct_i / Decimal('100')
+
+            share_i = (restante * pct_i).quantize(
+                Decimal('0.01'),
+                rounding=ROUND_HALF_UP
+            )
+            fracoes_valores.append({
+                'unidade': u,
+                'valor': float(share_i),
+            })
+
+        # 10) renderiza usando “fracoes_valores” em vez dos Rateio já gravados
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':         despesa,
+            'fracoes_valores': fracoes_valores,
+            'valor_exibido':   valor_exibido,
+        })
 
     # --- GÁS ---
     if despesa.tipo.nome.lower() == "gás":
@@ -607,6 +728,8 @@ def ver_rateio(request, despesa_id):
             'gas_params': gas_params,
             'gas_info':   gas_info,
             'diferenca':  diferenca,
+            'valor_exibido':  valor_exibido,
+
         })
 
     # --- ÁGUA ---
@@ -635,6 +758,7 @@ def ver_rateio(request, despesa_id):
             'rateios':    rateios,
             'agua_params': agua_params,
             'agua_info':   agua_info,
+            'valor_exibido':  valor_exibido,
         })
 
     # --- ENERGIA SALÃO ---
@@ -696,6 +820,7 @@ def ver_rateio(request, despesa_id):
             'energia_total':  energia_total,
             'energia_info':   energia_info,
             'total_leituras': total_leituras,
+            'valor_exibido': valor_exibido,
         })
 
 
@@ -704,18 +829,23 @@ def ver_rateio(request, despesa_id):
     fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
     if fracoes_qs.exists():
         fracoes_valores = [
-            {'unidade': f.unidade, 'valor': round(float(despesa.valor_total) * float(f.percentual), 2)}
+            {
+                'unidade': f.unidade,
+                'valor': round(float(valor_exibido) * float(f.percentual), 2),
+            }
             for f in fracoes_qs
         ]
         return render(request, 'despesas/ver_rateio.html', {
             'despesa':         despesa,
             'fracoes_valores': fracoes_valores,
+            'valor_exibido':  valor_exibido,
         })
 
     # --- PADRÃO ---
     return render(request, 'despesas/ver_rateio.html', {
         'despesa': despesa,
         'rateios': rateios,
+        'valor_exibido':  valor_exibido,
     })
 
 
