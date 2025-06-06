@@ -6,6 +6,9 @@ from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
     LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
 )
+from django.db import transaction
+from django.db.models.signals import post_delete
+from .signals import recalc_fundo_reserva
 from datetime import datetime
 import json
 from decimal import Decimal, ROUND_HALF_UP
@@ -347,6 +350,9 @@ def nova_despesa(request):
 
         # === ÁGUA ===
         elif tipo.nome.lower() == "água":
+            LeituraAgua.objects.filter(
+                mes=int(despesa.mes), ano=despesa.ano
+            ).delete()
             fatura   = parse_float(request.POST.get('agua_fatura'))
             m3_total = parse_float(request.POST.get('agua_m3_total'), 1)
             valor_m3 = (fatura / m3_total) if m3_total else 0
@@ -595,6 +601,10 @@ def excluir_despesa(request, despesa_id):
     if request.method == 'POST':
         try:
             desp = Despesa.objects.get(id=despesa_id)
+            if desp.tipo.nome.lower() == "água":
+                LeituraAgua.objects.filter(
+                    mes=int(desp.mes), ano=desp.ano
+                ).delete()
             desp.delete()
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
@@ -907,6 +917,12 @@ def ajax_ultima_agua(request):
 
 def limpar_tudo(request):
     # apaga todas as despesas (e cascata todos os rateios)
-    Despesa.objects.all().delete()
+    post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
+    try:
+        with transaction.atomic():
+            Despesa.objects.all().delete()
+    finally:
+        # Garante que o sinal volte a estar conectado
+        post_delete.connect(recalc_fundo_reserva, sender=Despesa)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
