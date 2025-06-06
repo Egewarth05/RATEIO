@@ -2,3 +2,8 @@ asgiref==3.8.1
 Django==5.2
 sqlparse==0.5.3
 typing_extensions==4.13.2
+
+pandas
+numpy
+xlsxwriter
+weasyprint
