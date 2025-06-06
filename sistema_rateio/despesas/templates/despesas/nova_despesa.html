@@ -599,6 +599,19 @@
           energiaKwhTotal  = document.querySelector('[name="energia_kwh_total"]'),
           energiaCustoEl   = document.getElementById('energia_custo_kwh');
 
+    function atualizaRate() {
+          const f = parseFloat(af.value.replace(',', '.')) || 0;
+          const m = parseFloat(at.value.replace(',', '.')) || 0;
+          ar.value = m ? (f / m).toFixed(2).replace('.', ',') : '';
+          document.querySelectorAll('[name^="agua_atual_"]').forEach(el =>
+              el.dispatchEvent(new Event('input'))
+          );
+      }
+
+      af.addEventListener('input', atualizaRate);
+      at.addEventListener('input', atualizaRate);
+      atualizaRate();
+
       // lista de tipos que usam apenas o bloco "simples"
     const simplesText = [
       'serviço - faxina',
