@@ -911,6 +911,14 @@ class DespesaAguaAdmin(DespesaBaseAdmin):
             }
         }
 
+        duplicatas = DespesaAgua.objects.filter(
+            mes=obj.mes,
+            ano=obj.ano
+        ).exclude(pk=obj.pk)
+        for dup in duplicatas:
+            Rateio.objects.filter(despesa=dup).delete()
+            dup.delete()
+
         # 4) Salva o objeto “DespesaÁgua” no banco, para termos obj.id disponível
         super().save_model(request, obj, form, change)
 
