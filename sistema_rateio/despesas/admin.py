@@ -922,8 +922,27 @@ class DespesaAguaAdmin(DespesaBaseAdmin):
         #      caso já existam (evita herdar valores negativos).
         Rateio.objects.filter(despesa=obj).delete()
 
-        # 5.2) Calcule o consumo de cada unidade em m³ (diferença entre leituras).
-        #      Sempre que (leitura_atual < leitura_anterior), trataremos como 0.
+        LeituraAgua.objects.filter(mes=obj.mes, ano=obj.ano).delete()
+
+        # Caso o JSON de parâmetros traga um dicionário de leituras no formato
+        # {unidade_id: leitura}, cria novas entradas automaticamente. Caso
+        # contrário, orienta o usuário a cadastrá-las manualmente.
+        leituras_novas = (obj.agua_leituras or {}).get('leituras')
+        if leituras_novas:
+            for unidade_id, valor in leituras_novas.items():
+                unidade = Unidade.objects.filter(id=unidade_id).first()
+                if unidade:
+                    LeituraAgua.objects.create(
+                        unidade=unidade,
+                        mes=obj.mes,
+                        ano=obj.ano,
+                        leitura=Decimal(str(valor))
+                    )
+        else:
+            self.message_user(
+                request,
+                'Registre as leituras de água para este mês na seção "Leituras de Água".'
+            )
 
         # Determina mês/ano anterior para buscar a leitura de maio/2025
         mes_atual = int(obj.mes)
