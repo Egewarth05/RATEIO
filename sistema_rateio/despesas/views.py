@@ -302,6 +302,20 @@ def nova_despesa(request):
     if form.is_valid():
         despesa = form.save(commit=False)
         despesa.tipo = tipo
+
+        if tipo.nome.lower() == 'água':
+            antigas = Despesa.objects.filter(
+                tipo__nome__iexact='água',
+                mes=despesa.mes,
+                ano=despesa.ano,
+            )
+            if antigas.exists():
+                Rateio.objects.filter(despesa__in=antigas).delete()
+                antigas.delete()
+            LeituraAgua.objects.filter(
+                mes=int(despesa.mes), ano=despesa.ano
+            ).delete()
+
         total = 0
         despesa.descricao = request.POST.get('descricao_unico', '').strip()
         valores_por_unidade = {}
@@ -918,13 +932,11 @@ def ajax_ultima_agua(request):
 def limpar_tudo(request):
     # apaga todas as despesas (e cascata todos os rateios)
     post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
-    post_delete.disconnect(apagar_leituras_agua, sender=Despesa)
     try:
         with transaction.atomic():
             Despesa.objects.all().delete()
     finally:
         # Garante que os sinais voltem a estar conectados
         post_delete.connect(recalc_fundo_reserva, sender=Despesa)
-        post_delete.connect(apagar_leituras_agua, sender=Despesa)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
