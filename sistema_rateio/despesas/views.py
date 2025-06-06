@@ -918,11 +918,13 @@ def ajax_ultima_agua(request):
 def limpar_tudo(request):
     # apaga todas as despesas (e cascata todos os rateios)
     post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
+    post_delete.disconnect(apagar_leituras_agua, sender=Despesa)
     try:
         with transaction.atomic():
             Despesa.objects.all().delete()
     finally:
-        # Garante que o sinal volte a estar conectado
+        # Garante que os sinais voltem a estar conectados
         post_delete.connect(recalc_fundo_reserva, sender=Despesa)
+        post_delete.connect(apagar_leituras_agua, sender=Despesa)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
