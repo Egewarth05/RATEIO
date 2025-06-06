@@ -12,7 +12,8 @@ from .models import (
     Rateio,
     FracaoPorTipoDespesa,
     Unidade,
-    LeituraEnergia
+    LeituraEnergia,
+    LeituraAgua
 )
 
 BASE_TIPOS = [
@@ -96,10 +97,10 @@ def recalc_fundo_reserva(sender, instance, **kwargs):
             valor = (restante * pct).quantize(Decimal('0.01'))
         Rateio.objects.create(despesa=fr, unidade=unidade, valor=valor)
 
-@receiver(post_save, sender=FundoReserva)
-def criar_rateios_para_fundo(sender, instance, **kwargs):
-    # limpa rateios antigos
-    Rateio.objects.filter(despesa=instance).delete()
+@receiver(post_delete, sender=Despesa)
+def apagar_leituras_agua(sender, instance, **kwargs):
+    if instance.tipo.nome.lower() == 'água':
+        LeituraAgua.objects.filter(mes=instance.mes, ano=instance.ano).delete()
 
     valor_base = instance.valor_total
     # busca todas as frações para este tipo-de-fundo
