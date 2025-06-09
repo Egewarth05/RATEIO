@@ -1080,7 +1080,7 @@ class LeituraAguaAdmin(admin.ModelAdmin):
         if anterior:
             diff = obj.leitura - anterior.leitura
             return f"{max(diff, 0):.4f}"
-        return "0.0000"
+        return f"{obj.leitura:.4f}"
     consumo.short_description = 'Consumo (m³)'
 
 @admin.register(FracaoPorTipoDespesa)
