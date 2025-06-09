@@ -981,9 +981,11 @@ class DespesaAguaAdmin(DespesaBaseAdmin):
 
             if leit_atual and leit_ant:
                 diff = leit_atual.leitura - leit_ant.leitura
-                consumo_m3 = diff if diff > 0 else Decimal('0')
+                consumo_m3 = diff if diff > 0 else Decimal("0")
+            elif leit_atual:
+                consumo_m3 = leit_atual.leitura
             else:
-                consumo_m3 = Decimal('0')
+                consumo_m3 = Decimal("0")
 
             consumos[unidade] = consumo_m3
 
