@@ -878,6 +878,18 @@ class DespesaGasAdmin(DespesaBaseAdmin):
         # (3) salva tudo normalmente
         super().save_model(request, obj, form, change)
 
+        LeituraGas.objects.filter(mes=obj.mes, ano=obj.ano).delete()
+        leituras_novas = (obj.gas_leituras or {}).get('leituras')
+        if leituras_novas:
+            for unidade_id, valor in leituras_novas.items():
+                unidade = Unidade.objects.filter(id=unidade_id).first()
+                if unidade:
+                    LeituraGas.objects.create(
+                        unidade=unidade,
+                        mes=obj.mes,
+                        ano=obj.ano,
+                        leitura=Decimal(str(valor))
+                    )
 
 @admin.register(DespesaAgua)
 class DespesaAguaAdmin(DespesaBaseAdmin):
