@@ -209,7 +209,7 @@ class LeituraEnergiaAdmin(admin.ModelAdmin):
 
         if anterior:
             diff = obj.leitura - anterior.leitura
-            return f"{diff:.3f}"
+            return f"{max(diff, 0):.3f}"
         return "—"
     consumo.short_description = 'Consumo (kWh)'
 
@@ -766,7 +766,7 @@ class LeituraGasAdmin(admin.ModelAdmin):
             # diferença entre a leitura atual e a anterior
             diff = obj.leitura - anterior.leitura
             # formata com 4 casas decimais, se quiser:
-            return f"{diff:.4f}"
+            return f"{max(diff, 0):.4f}"
         else:
             return "—"  # ou "0.0000", como preferir
 
@@ -1076,7 +1076,8 @@ class LeituraAguaAdmin(admin.ModelAdmin):
         ).first()
 
         if anterior:
-            return f"{(obj.leitura - anterior.leitura):.4f}"
+            diff = obj.leitura - anterior.leitura
+            return f"{max(diff, 0):.4f}"
         return "0.0000"
     consumo.short_description = 'Consumo (m³)'
 
