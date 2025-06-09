@@ -1076,13 +1076,9 @@ class LeituraAguaAdmin(admin.ModelAdmin):
         ).first()
 
         if anterior:
-            consumo = obj.leitura - anterior.leitura
-        else:
-            # Se não houver leitura anterior, considera todo o valor atual como
-            # consumo para exibição no admin
-            consumo = obj.leitura
-
-        return f"{consumo:.4f}"
+            diff = obj.leitura - anterior.leitura
+            return f"{max(diff, 0):.4f}"
+        return "0.0000"
     consumo.short_description = 'Consumo (m³)'
 
 @admin.register(FracaoPorTipoDespesa)
@@ -1441,8 +1437,14 @@ class BoletoAdmin(admin.ModelAdmin):
             ).first()
 
             if rateio_gas and rateio_gas.valor > Decimal('0'):
-                atual_gas = LeituraGas.objects.filter(unidade=unidade, mes=mes, ano=ano).first()
-                anterior  = LeituraGas.objects.filter(unidade=unidade, mes=mes_ant, ano=ano_ant).first()
+                atual_gas = LeituraGas.objects.filter(unidade=unidade,
+                                       mes=str(mes),
+                                       ano=str(ano)
+                                      ).first()
+                anterior  = LeituraGas.objects.filter(unidade=unidade,
+                                       mes=str(mes_ant),
+                                       ano=str(ano_ant)
+                                      ).first()
                 if atual_gas and anterior:
                     diff = atual_gas.leitura - anterior.leitura
                     consumo_gas = diff if diff > 0 else 0
@@ -1452,8 +1454,14 @@ class BoletoAdmin(admin.ModelAdmin):
                 consumo_gas = 0
 
             if existe_despesa_agua:
-                atual_agua = LeituraAgua.objects.filter(unidade=unidade, mes=mes, ano=ano).first()
-                ant_agua   = LeituraAgua.objects.filter(unidade=unidade, mes=mes_ant, ano=ano_ant).first()
+                atual_agua = LeituraAgua.objects.filter(unidade=unidade,
+                                                         mes=str(mes),
+                                                         ano=str(ano)
+                                                        ).first()
+                ant_agua   = LeituraAgua.objects.filter(unidade=unidade,
+                                                         mes=str(mes_ant),
+                                                         ano=str(ano_ant)
+                                                        ).first()
                 if atual_agua and ant_agua:
                     diff_wa = atual_agua.leitura - ant_agua.leitura
                     consumo_agua = diff_wa if diff_wa > 0 else 0
