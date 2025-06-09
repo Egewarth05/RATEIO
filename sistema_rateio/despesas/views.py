@@ -338,11 +338,13 @@ def nova_despesa(request):
             m3_kg   = parse_float(request.POST.get('m3_kg'), 1)
             preco   = parse_float(request.POST.get('valor_m3'))
 
+            LeituraGas.objects.filter(
+                mes=int(despesa.mes), ano=despesa.ano
+            ).delete()
+
             for u in unidades:
                 raw = request.POST.get(f'atual_{u.id}', '').strip()
-                if not raw:
-                    c = 0
-                else:
+                if raw:
                     atual = parse_float(raw)
                     ant   = leituras_anteriores.get(u.id, 0)
                     c = max(atual - ant, 0)
@@ -350,6 +352,8 @@ def nova_despesa(request):
                         unidade=u, mes=int(despesa.mes), ano=despesa.ano,
                         defaults={'leitura': atual}
                     )
+                else:
+                    c = 0
 
                 v = c * preco
                 valores_por_unidade[u]     = v
