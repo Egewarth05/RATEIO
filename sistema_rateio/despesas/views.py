@@ -312,9 +312,13 @@ def nova_despesa(request):
             if antigas.exists():
                 Rateio.objects.filter(despesa__in=antigas).delete()
                 antigas.delete()
-            LeituraAgua.objects.filter(
+            antigas_leituras = LeituraAgua.objects.filter(
                 mes=int(despesa.mes), ano=despesa.ano
-            ).delete()
+            )
+            leituras_atual_existentes = {
+                l.unidade_id: float(l.leitura) for l in antigas_leituras
+            }
+            antigas_leituras.delete()
 
         total = 0
         despesa.descricao = request.POST.get('descricao_unico', '').strip()
@@ -364,14 +368,16 @@ def nova_despesa(request):
 
         # === ÁGUA ===
         elif tipo.nome.lower() == "água":
-            LeituraAgua.objects.filter(
-                mes=int(despesa.mes), ano=despesa.ano
-            ).delete()
+
             fatura   = parse_float(request.POST.get('agua_fatura'))
             m3_total = parse_float(request.POST.get('agua_m3_total'), 1)
             valor_m3 = (fatura / m3_total) if m3_total else 0
             for u in unidades:
-                atual = parse_float(request.POST.get(f'agua_atual_{u.id}'))
+                raw = request.POST.get(f'agua_atual_{u.id}', '').strip()
+                if raw == "":
+                    atual = parse_float(leituras_atual_existentes.get(u.id, 0))
+                else:
+                    atual = parse_float(raw)
                 ant   = leituras_agua_anteriores.get(u.id, 0)
                 c     = max(atual - ant, 0)
                 v     = c * valor_m3
