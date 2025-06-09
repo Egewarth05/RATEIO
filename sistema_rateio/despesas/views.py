@@ -373,7 +373,7 @@ def nova_despesa(request):
             for u in unidades:
                 atual = parse_float(request.POST.get(f'agua_atual_{u.id}'))
                 ant   = leituras_agua_anteriores.get(u.id, 0)
-                c     = atual - ant
+                c     = max(atual - ant, 0)
                 v     = c * valor_m3
                 valores_por_unidade[u]     = v
                 consumos_por_unidade[u.id] = c
@@ -803,7 +803,7 @@ def ver_rateio(request, despesa_id):
             agua_info[u.id] = {
                 'leitura_anterior': la,
                 'leitura_atual':    lk,
-                'consumo':          lk - la,
+                'consumo':          max(lk - la, 0),
             }
         return render(request, 'despesas/ver_rateio.html', {
             'despesa':    despesa,
