@@ -768,7 +768,7 @@ class LeituraGasAdmin(admin.ModelAdmin):
             # formata com 4 casas decimais, se quiser:
             return f"{max(diff, 0):.4f}"
         else:
-            return "—"  # ou "0.0000", como preferir
+            return f"{obj.leitura:.4f}"
 
     consumo.short_description = 'Consumo (m³)'
     consumo.admin_order_field = 'leitura'
@@ -1450,6 +1450,8 @@ class BoletoAdmin(admin.ModelAdmin):
                 if atual_gas and anterior:
                     diff = atual_gas.leitura - anterior.leitura
                     consumo_gas = diff if diff > 0 else 0
+                elif atual_gas:
+                    consumo_gas = atual_gas.leitura
                 else:
                     consumo_gas = 0
             else:
@@ -1781,6 +1783,8 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 if atual_gas and ant_gas:
                     diff_g = atual_gas.leitura - ant_gas.leitura
                     gas_map[un] = diff_g if diff_g > 0 else 0
+                elif atual_gas:
+                    gas_map[un] = atual_gas.leitura
                 else:
                     gas_map[un] = 0
             else:
@@ -1878,6 +1882,8 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             if ant_ga and atu_ga:
                 diff_ga = atu_ga.leitura - ant_ga.leitura
                 cons_ga = diff_ga if diff_ga > 0 else 0
+            elif atu_ga:
+                cons_ga = atu_ga.leitura
             else:
                 cons_ga = 0
 
