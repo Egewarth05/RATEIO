@@ -1467,6 +1467,8 @@ class BoletoAdmin(admin.ModelAdmin):
                 if atual_agua and ant_agua:
                     diff_wa = atual_agua.leitura - ant_agua.leitura
                     consumo_agua = diff_wa if diff_wa > 0 else 0
+                elif atual_agua:
+                    consumo_agua = atual_agua.leitura
                 else:
                     consumo_agua = 0
 
