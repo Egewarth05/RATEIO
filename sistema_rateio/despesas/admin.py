@@ -2203,7 +2203,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             c_val   = idx["Energia – R$"]
 
             # formatos
-            number4_fmt  = writer.book.add_format({'num_format':'0.0000','align':'center'})
+            number4_fmt  = writer.book.add_format({'num_format':'0.000','align':'center'})
             currency_fmt = writer.book.add_format({'num_format':'R$ #,##0.00','align':'center'})
 
             # tenta obter a aba 'DESPESAS RATEIO'
@@ -2239,7 +2239,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 'bg_color':'#D3D3D3',
             })
             number4_fmt = workbook.add_format({
-                'num_format': '0.0000',
+                'num_format': '0.000',
                 'align':      'center',
                 'valign':     'vcenter',
             })
@@ -2328,7 +2328,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
                 # formato de consumo com 4 casas e centralizado
                 number4_fmt = workbook.add_format({
-                    'num_format': '0.0000',
+                    'num_format': '0.000',
                     'align':      'center',
                     'valign':     'vcenter',
                 })
