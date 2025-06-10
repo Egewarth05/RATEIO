@@ -2163,7 +2163,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             workbook       = writer.book
             bold_currency_fmt = workbook.add_format({
                 'bold':      True,
-                'num_format':'R$ #,##0.00;R$ -#,##0.00;"–";@',
+                'num_format':'R$ #,##0,00;R$ -#,##0,00;"–";@',
                 'align':     'center',
                 'valign':    'vcenter',
             })
@@ -2198,8 +2198,8 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             c_val   = idx["Energia – R$"]
 
             # formatos
-            number4_fmt  = writer.book.add_format({'num_format':'0.000','align':'center'})
-            currency_fmt = writer.book.add_format({'num_format':'R$ #,##0.00','align':'center'})
+            number4_fmt  = writer.book.add_format({'num_format':'0,000','align':'center'})
+            currency_fmt = writer.book.add_format({'num_format':'R$ #,##0,00','align':'center'})
 
             # tenta obter a aba 'DESPESAS RATEIO'
             ws3 = writer.sheets.get('DESPESAS RATEIO')
@@ -2234,14 +2234,14 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 'bg_color':'#D3D3D3',
             })
             number4_fmt = workbook.add_format({
-                'num_format': '0.000',
+                'num_format': '0,000',
                 'align':      'center',
                 'valign':     'vcenter',
             })
             # negrito + moeda para a linha TOTAL BOLETO
             bold_currency_fmt = workbook.add_format({
                 'bold':      True,
-                'num_format':'R$ #,##0.00;R$ -#,##0.00;"–";@',
+                'num_format':'R$ #,##0,00;R$ -#,##0,00;"–";@',
                 'align':     'center',
                 'valign':    'vcenter',
             })
@@ -2323,7 +2323,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
                 # formato de consumo com 4 casas e centralizado
                 number4_fmt = workbook.add_format({
-                    'num_format': '0.000',
+                    'num_format': '0,000',
                     'align':      'center',
                     'valign':     'vcenter',
                 })
