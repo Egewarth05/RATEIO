@@ -1791,8 +1791,13 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                     diff1 = atu1.leitura - ant1.leitura
                     diff2 = atu2.leitura - ant2.leitura
                     energia = (diff1 + diff2) if (diff1 + diff2) > 0 else 0
-                else:
-                    energia = 0
+                energia = (
+                        LeituraEnergia.objects
+                        .filter(unidade__nome=un, mes=mes, ano=ano)
+                        .aggregate(total=Sum('leitura'))
+                        .get('total')
+                        or Decimal('0')
+                    )
             else:
                 energia = 0
 
@@ -1870,25 +1875,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             uni: (val or 0)
             for uni, val in df_rateio_pivot.set_index('Unidade')['Gás'].to_dict().items()
         }
-        # 7) DESPESAS × RATEIO
-#        wa = DespesaAgua.objects.filter(mes=mes, ano=ano).order_by('-id').first()
-#        if wa and wa.agua_leituras:
-#            params = wa.agua_leituras.get('params', {})
-#            agua_fat    = Decimal(params.get('fatura',    0))
-#            agua_m3tot  = Decimal(params.get('m3_total',  0))
-#            agua_val_m3 = Decimal(params.get('valor_m3_agua',  0))
-#        else:
-#            agua_fat = agua_m3tot = agua_val_m3 = Decimal('0')
-
-#        if agua_m3tot != Decimal("0"):
-#            valor_por_m3 = (agua_fat / agua_m3tot).quantize(
-#                Decimal("0.01"),
-#                rounding=ROUND_HALF_UP
-#            )
-#        else:
-#            valor_por_m3 = Decimal("0.00")
-
-
 
         en = DespesaEnergia.objects.filter(mes=mes, ano=ano).order_by('-id').first()
         if en and en.energia_leituras:
@@ -1923,34 +1909,25 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             atu1 = LeituraEnergia.objects.filter(unidade=un, mes=mes,     ano=ano,     medidor=1).first()
             ant2 = LeituraEnergia.objects.filter(unidade=un, mes=prev_mes, ano=prev_ano, medidor=2).first()
             atu2 = LeituraEnergia.objects.filter(unidade=un, mes=mes,     ano=ano,     medidor=2).first()
+            la1 = getattr(ant1, 'leitura', Decimal('0'))
+            lk1 = getattr(atu1, 'leitura', Decimal('0'))
+            la2 = getattr(ant2, 'leitura', Decimal('0'))
+            lk2 = getattr(atu2, 'leitura', Decimal('0'))
             if ant1 and atu1 and ant2 and atu2:
-                diff1 = atu1.leitura - ant1.leitura
-                diff2 = atu2.leitura - ant2.leitura
-                total_diff = diff1 + diff2
-                cons_en = total_diff if total_diff > 0 else 0
-            else:
-                cons_en = 0
-
-
-            la1 = getattr(ant1, 'leitura', 0)
-            lk1 = getattr(atu1, 'leitura', 0)
-            la2 = getattr(ant2, 'leitura', 0)
-            lk2 = getattr(atu2, 'leitura', 0)
-
-            cons_en = (Decimal(str(lk1)) - Decimal(str(la1))) + (Decimal(str(lk2)) - Decimal(str(la2)))
-            # multiplica Decimal * Decimal → OK, já quantizando para duas casas
-            valor_dec = (cons_en * en_uso).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            # e, se você quiser armazenar como float para o DataFrame:
-            valor = float(valor_dec)
-
-            if lk1 is None and lk2 is None:
-                cons_en = None
-                valor   = None
-            else:
-                diff1   = (lk1 or 0) - (la1 or 0)
-                diff2   = (lk2 or 0) - (la2 or 0)
+                diff1 = lk1 - la1
+                diff2 = lk2 - la2
                 cons_en = max(diff1 + diff2, 0)
-                valor   = cons_en * Decimal(en_uso)  # ou Decimal(en_uso)
+            else:
+                cons_en = (
+                        LeituraEnergia.objects
+                        .filter(unidade=un, mes=mes, ano=ano)
+                        .aggregate(total=Sum('leitura'))
+                        .get('total')
+                        or Decimal('0')
+                    )
+
+            valor_dec = (Decimal(cons_en) * en_uso).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            valor = float(valor_dec)
 
             # 1) pega os valores prontos vindos do admin
             wa = DespesaAgua.objects.filter(mes=mes, ano=ano).order_by('-id').first()
@@ -1991,9 +1968,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 en_custo   = Decimal(p.get('custo_kwh', 0))
             else:
                 en_kwh_tot = en_custo = Decimal('0')
-
-            cons_en = (lk1 - la1) + (lk2 - la2)
-            valor   = en_uso * cons_en
 
             # 2) só depois disso você monta o dicionário:
             rows.append({
