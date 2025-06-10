@@ -210,7 +210,18 @@ class LeituraEnergiaAdmin(admin.ModelAdmin):
         if anterior:
             diff = obj.leitura - anterior.leitura
             return f"{max(diff, 0):.3f}"
-        return "—"
+        total_leitura = (
+            LeituraEnergia.objects
+            .filter(
+                unidade=obj.unidade,
+                mes=obj.mes,
+                ano=obj.ano,
+            )
+            .aggregate(total=Sum('leitura'))
+            .get('total')
+            or Decimal('0')
+        )
+        return f"{Decimal(total_leitura):.3f}"
     consumo.short_description = 'Consumo (kWh)'
 
     def save_model(self, request, obj, form, change):
