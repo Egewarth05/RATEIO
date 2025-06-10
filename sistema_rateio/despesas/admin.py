@@ -213,6 +213,15 @@ class LeituraEnergiaAdmin(admin.ModelAdmin):
         return "—"
     consumo.short_description = 'Consumo (kWh)'
 
+    def save_model(self, request, obj, form, change):
+        LeituraEnergia.objects.filter(
+            unidade=obj.unidade,
+            mes=obj.mes,
+            ano=obj.ano,
+            medidor=obj.medidor
+        ).exclude(pk=obj.pk).delete()
+        super().save_model(request, obj, form, change)
+
 @admin.register(DespesaEnergia)
 class DespesaEnergiaAdmin(admin.ModelAdmin):
     form = DespesaEnergiaForm
