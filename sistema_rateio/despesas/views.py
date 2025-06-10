@@ -447,24 +447,35 @@ def nova_despesa(request):
             custo_kwh = parse_float(request.POST.get('energia_custo_kwh'))
             uso_kwh   = parse_float(request.POST.get('energia_uso_kwh'))
 
+            LeituraEnergia.objects.filter(
+                mes=int(despesa.mes), ano=despesa.ano
+            ).delete()
+
             valores_por_unidade = {}
             for u in unidades:
-                cur1 = parse_float(request.POST.get(f'energia_atual1_{u.id}'))
-                ant1 = leituras_anteriores_energia1[u.id]
-                cur2 = parse_float(request.POST.get(f'energia_atual2_{u.id}'))
-                ant2 = leituras_anteriores_energia2[u.id]
+                raw1 = request.POST.get(f'energia_atual1_{u.id}', '').strip()
+                raw2 = request.POST.get(f'energia_atual2_{u.id}', '').strip()
+                cons = 0
 
-                LeituraEnergia.objects.update_or_create(
-                    unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=1,
-                    defaults={'leitura': cur1}
-                )
-                LeituraEnergia.objects.update_or_create(
-                    unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=2,
-                    defaults={'leitura': cur2}
-                )
+                if raw1:
+                    cur1 = parse_float(raw1)
+                    ant1 = leituras_anteriores_energia1[u.id]
+                    cons += cur1 - ant1
+                    LeituraEnergia.objects.update_or_create(
+                        unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=1,
+                        defaults={'leitura': cur1}
+                    )
 
-                raw_cons = (cur1 - ant1) + (cur2 - ant2)
-                cons     = max(raw_cons, 0)
+                if raw2:
+                    cur2 = parse_float(raw2)
+                    ant2 = leituras_anteriores_energia2[u.id]
+                    cons += cur2 - ant2
+                    LeituraEnergia.objects.update_or_create(
+                        unidade=u, mes=int(despesa.mes), ano=despesa.ano, medidor=2,
+                        defaults={'leitura': cur2}
+                    )
+
+                cons = max(cons, 0)
                 val      = cons * uso_kwh
                 valores_por_unidade[u] = val
 
