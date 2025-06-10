@@ -1787,19 +1787,11 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                     mes=mes, ano=ano
                 ).first()
 
-                if ant1 and atu1 and ant2 and atu2:
-                    diff1 = atu1.leitura - ant1.leitura
-                    diff2 = atu2.leitura - ant2.leitura
-                    energia = (diff1 + diff2) if (diff1 + diff2) > 0 else 0
-                energia = (
-                        LeituraEnergia.objects
-                        .filter(unidade__nome=un, mes=mes, ano=ano)
-                        .aggregate(total=Sum('leitura'))
-                        .get('total')
-                        or Decimal('0')
-                    )
-            else:
-                energia = 0
+            diff1 = (atu1.leitura - ant1.leitura) if (ant1 and atu1) else 0
+            diff2 = (atu2.leitura - ant2.leitura) if (ant2 and atu2) else 0
+            energia = max(diff1, 0) + max(diff2, 0)
+        else:
+            energia = 0
 
             energia_map[un] = energia
 
@@ -1909,22 +1901,19 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             atu1 = LeituraEnergia.objects.filter(unidade=un, mes=mes,     ano=ano,     medidor=1).first()
             ant2 = LeituraEnergia.objects.filter(unidade=un, mes=prev_mes, ano=prev_ano, medidor=2).first()
             atu2 = LeituraEnergia.objects.filter(unidade=un, mes=mes,     ano=ano,     medidor=2).first()
-            la1 = getattr(ant1, 'leitura', Decimal('0'))
-            lk1 = getattr(atu1, 'leitura', Decimal('0'))
-            la2 = getattr(ant2, 'leitura', Decimal('0'))
-            lk2 = getattr(atu2, 'leitura', Decimal('0'))
-            if ant1 and atu1 and ant2 and atu2:
-                diff1 = lk1 - la1
-                diff2 = lk2 - la2
-                cons_en = max(diff1 + diff2, 0)
-            else:
-                cons_en = (
-                        LeituraEnergia.objects
-                        .filter(unidade=un, mes=mes, ano=ano)
-                        .aggregate(total=Sum('leitura'))
-                        .get('total')
-                        or Decimal('0')
-                    )
+            la1_val = ant1.leitura if ant1 else None
+            lk1_val = atu1.leitura if atu1 else None
+            la2_val = ant2.leitura if ant2 else None
+            lk2_val = atu2.leitura if atu2 else None
+
+            diff1 = (lk1_val - la1_val) if (la1_val is not None and lk1_val is not None) else 0
+            diff2 = (lk2_val - la2_val) if (la2_val is not None and lk2_val is not None) else 0
+            cons_en = max(diff1, 0) + max(diff2, 0)
+
+            la1 = la1_val if la1_val is not None else '-'
+            lk1 = lk1_val if lk1_val is not None else '-'
+            la2 = la2_val if la2_val is not None else '-'
+            lk2 = lk2_val if lk2_val is not None else '-'
 
             valor_dec = (Decimal(cons_en) * en_uso).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             valor = float(valor_dec)
