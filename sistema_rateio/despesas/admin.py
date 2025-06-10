@@ -2003,6 +2003,12 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
         df_leituras = pd.DataFrame(rows)
 
+        df_leituras['Energia – Consumo kWh'] = (
+            df_leituras['Energia – Consumo kWh']
+              .astype(float)
+              .round(3)
+        )
+
         df_leituras['Energia – Med1 Atu.'] = (
             df_leituras['Energia – Med1 Atu.']
               .replace('-', np.nan)
