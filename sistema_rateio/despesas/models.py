@@ -56,10 +56,19 @@ class LeituraAgua(models.Model):
         return f"{self.unidade.nome} - {self.mes}/{self.ano} - {self.leitura}"
 
 class TipoDespesa(models.Model):
-    nome = models.CharField("Tipo de Despesa", max_length=100)
+    nome = models.CharField(max_length=100)
+    # adiciona este campo:
+    ordem = models.PositiveIntegerField(
+        default=100,
+        help_text="Número para definir a posição (menor→aparece primeiro)."
+    )
 
     def __str__(self):
         return self.nome
+
+    class Meta:
+        # aqui definimos que a ordenação padrão usará o campo 'ordem', depois 'nome'
+        ordering = ['ordem', 'nome']
 
 class FracaoPorTipoDespesa(models.Model):
     tipo_despesa = models.ForeignKey(
@@ -95,6 +104,7 @@ class Despesa(models.Model):
     gas_leituras = JSONField(blank=True, null=True)
     agua_leituras= JSONField("Leituras de Água", blank=True, null=True)
     energia_leituras = JSONField("Leituras de Energia", blank=True, null=True)
+    nf_info = JSONField("Notas Fiscais", blank=True, null=True)
 
     @property
     def total_leituras(self):
