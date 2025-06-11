@@ -1850,7 +1850,9 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             else:
                 agua_map[un] = 0
 
-        # adiciona as linhas no final
+        df_exib_un = df_exib_un.replace(',', '.', regex=True)
+        # converte todas as colunas para valores numéricos antes de calcular
+        # o total, tratando quaisquer valores não numéricos como 0
         df_exib_un = df_exib_un.apply(pd.to_numeric, errors="coerce").fillna(0)
         df_exib_un.loc["TOTAL BOLETO"] = df_exib_un.sum(axis=0)
         df_exib_un.loc['Consumo Gás m³']  = pd.Series(gas_map)
