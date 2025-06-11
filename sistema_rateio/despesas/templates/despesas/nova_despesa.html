@@ -511,8 +511,8 @@
             <td><input type="text" name="nf_numero_0" class="form-control"></td>
             <td>
               <select name="nf_tipo_0" class="form-select">
-                <option value="com">Com a Sala</option>
-                <option value="sem">Sem a Sala</option>
+                <option value="com" style="color:green;">Com a Sala</option>
+                <option value="sem" style="color:blue;">Sem a Sala</option>
               </select>
             </td>
             <td><input type="text" name="nf_valor_0" class="form-control valor-reais"></td>
@@ -523,11 +523,11 @@
       <button type="button" id="add-nf" class="btn btn-sm btn-secondary mb-2">Adicionar NF</button>
       <div class="d-flex align-items-end gap-3 flex-wrap">
         <div>
-          <label><strong>Total R$ Com Sala:</strong></label>
+          <label style="color:green;"><strong>Total R$ Com Sala:</strong></label>
           <input id="nf-total-com" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
         </div>
         <div>
-          <label><strong>Total R$ Sem Sala:</strong></label>
+          <label style="color:blue;"><strong>Total R$ Sem Sala:</strong></label>
           <input id="nf-total-sem" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
         </div>
       </div>
