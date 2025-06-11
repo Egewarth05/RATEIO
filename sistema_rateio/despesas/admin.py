@@ -2178,7 +2178,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             workbook       = writer.book
             bold_currency_fmt = workbook.add_format({
                 'bold':      True,
-                'num_format':'R$ #,##0,00;R$ -#,##0,00;"–";@',
+                'num_format':'R$ #,##0.00;R$ -#,##0.00;"–";@',
                 'align':     'center',
                 'valign':    'vcenter',
             })
@@ -2214,7 +2214,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
             # formatos
             number4_fmt  = writer.book.add_format({'num_format':'0.000','align':'center'})
-            currency_fmt = writer.book.add_format({'num_format':'R$ #,##0,00','align':'center'})
+            currency_fmt = writer.book.add_format({'num_format':'R$ #,##0.00','align':'center'})
 
             # tenta obter a aba 'DESPESAS RATEIO'
             ws3 = writer.sheets.get('DESPESAS RATEIO')
@@ -2256,7 +2256,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             # negrito + moeda para a linha TOTAL BOLETO
             bold_currency_fmt = workbook.add_format({
                 'bold':      True,
-                'num_format':'R$ #,##0,00;R$ -#,##0,00;"–";@',
+                'num_format':'R$ #,##0.00;R$ -#,##0.00;"–";@',
                 'align':     'center',
                 'valign':    'vcenter',
             })
