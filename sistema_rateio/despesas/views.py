@@ -689,6 +689,70 @@ def excluir_despesa(request, despesa_id):
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
     return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
+def editar_despesa(request, despesa_id):
+    despesa = get_object_or_404(Despesa, id=despesa_id)
+
+    if despesa.tipo.nome.lower() != 'material/servi\u00e7o de consumo':
+        messages.error(request, 'Despesa n\u00e3o \u00e9 do tipo Material/Servi\u00e7o de Consumo.')
+        return redirect('lista_despesas')
+
+    unidades = Unidade.objects.order_by('nome')
+    fracoes_map = {
+        f.unidade.id: float(f.percentual)
+        for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
+    }
+
+    def parse_float(v, default=0):
+        try:
+            return float(str(v).replace(',', '.'))
+        except Exception:
+            return default
+
+    if request.method == 'POST':
+        nf_entries = []
+        idx = 0
+        while True:
+            key = f'nf_valor_{idx}'
+            if key not in request.POST:
+                break
+            val = parse_float(request.POST.get(key))
+            forn = request.POST.get(f'nf_fornecedor_{idx}', '').strip()
+            hist = request.POST.get(f'nf_historico_{idx}', '').strip()
+            num  = request.POST.get(f'nf_numero_{idx}', '').strip()
+            tipo_nf = request.POST.get(f'nf_tipo_{idx}', 'com')
+            if forn or hist or num or val:
+                nf_entries.append({
+                    'fornecedor': forn,
+                    'historico': hist,
+                    'numero': num,
+                    'tipo': tipo_nf,
+                    'valor': val,
+                })
+            idx += 1
+
+        total_nf = sum(e['valor'] for e in nf_entries)
+        despesa.nf_info = nf_entries
+        despesa.valor_total = total_nf
+        despesa.save()
+
+        Rateio.objects.filter(despesa=despesa).delete()
+        if fracoes_map:
+            for u in unidades:
+                pct = fracoes_map.get(u.id, 0)
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=total_nf * pct)
+        else:
+            share = total_nf / len(unidades) if unidades else 0
+            for u in unidades:
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=share)
+
+        messages.success(request, 'Despesa atualizada com sucesso!')
+        return redirect('lista_despesas')
+
+    return render(request, 'despesas/editar_despesa.html', {
+        'despesa': despesa,
+        'nf_info': despesa.nf_info or [],
+    })
+
 def ver_rateio(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
     rateios = Rateio.objects.filter(despesa=despesa)
