@@ -521,9 +521,15 @@
         </tbody>
       </table>
       <button type="button" id="add-nf" class="btn btn-sm btn-secondary mb-2">Adicionar NF</button>
-      <div>
-        <label><strong>Total (R$):</strong></label>
-        <input id="nf-total" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+      <div class="d-flex align-items-end gap-3 flex-wrap">
+        <div>
+          <label><strong>Total R$ Com Sala:</strong></label>
+          <input id="nf-total-com" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+        </div>
+        <div>
+          <label><strong>Total R$ Sem Sala:</strong></label>
+          <input id="nf-total-sem" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+        </div>
       </div>
     </div>
 
@@ -637,7 +643,8 @@
           energiaCustoEl   = document.getElementById('energia_custo_kwh'),
           nfBlock      = document.getElementById('nf-block'),
           nfBody       = document.getElementById('nf-body'),
-          nfTotal      = document.getElementById('nf-total');
+          nfTotalCom   = document.getElementById('nf-total-com'),
+          nfTotalSem   = document.getElementById('nf-total-sem');
     const materialTipo = 'material/serviço de consumo';
 
     function atualizaRate() {
@@ -654,13 +661,17 @@
       atualizaRate();
 
     function nfTotalCalc(){
-        let soma = 0;
-        nfBody.querySelectorAll('input[name^="nf_valor_"]').forEach(inp=>{
-          const v = parseFloat(inp.value.replace(',', '.'))||0;
-          soma += v;
+        let somaCom = 0, somaSem = 0;
+        nfBody.querySelectorAll('tr').forEach(row => {
+          const valorInp = row.querySelector('input[name^="nf_valor_"]');
+          const tipoSel  = row.querySelector('select[name^="nf_tipo_"]');
+          const val = valorInp ? parseFloat(valorInp.value.replace(',', '.'))||0 : 0;
+          const tipo = tipoSel ? tipoSel.value : 'com';
+          if (tipo === 'sem') somaSem += val; else somaCom += val;
         });
-        nfTotal.value = soma.toFixed(2).replace('.', ',');
-        document.getElementById('id_valor_total').value = soma.toFixed(2);
+        nfTotalCom.value = somaCom.toFixed(2).replace('.', ',');
+        nfTotalSem.value = somaSem.toFixed(2).replace('.', ',');
+        document.getElementById('id_valor_total').value = (somaCom + somaSem).toFixed(2);
       }
 
       document.getElementById('add-nf').addEventListener('click', ()=>{
@@ -673,6 +684,7 @@
                         `<td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>`+
                         `<td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>`;
         nfBody.appendChild(row);
+        nfTotalCalc();
       });
 
       nfBlock.addEventListener('click', e=>{
@@ -683,7 +695,7 @@
       });
 
       nfBlock.addEventListener('input', e=>{
-        if(e.target.name && e.target.name.startsWith('nf_valor_')){
+        if(e.target.name && (e.target.name.startsWith('nf_valor_') || e.target.name.startsWith('nf_tipo_'))){
           nfTotalCalc();
         }
       });
