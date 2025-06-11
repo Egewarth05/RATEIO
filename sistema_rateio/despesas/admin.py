@@ -1787,11 +1787,11 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                     mes=mes, ano=ano
                 ).first()
 
-            diff1 = (atu1.leitura - ant1.leitura) if (ant1 and atu1) else 0
-            diff2 = (atu2.leitura - ant2.leitura) if (ant2 and atu2) else 0
-            energia = max(diff1, 0) + max(diff2, 0)
-        else:
-            energia = 0
+                diff1 = (atu1.leitura - ant1.leitura) if (ant1 and atu1) else 0
+                diff2 = (atu2.leitura - ant2.leitura) if (ant2 and atu2) else 0
+                energia = max(diff1, 0) + max(diff2, 0)
+            else:
+                energia = 0
 
             energia_map[un] = energia
 
