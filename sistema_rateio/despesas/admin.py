@@ -1681,6 +1681,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
         # 3) monta DataFrame RATEIO achatado
         rows = []
+        energia_map = {}
         for r in rateios:
             rows.append({
                 'Unidade':      r.unidade.nome,
@@ -1760,40 +1761,40 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
         # calcula consumo de gás e água por unidade
         energia_map = {}
-        for un in df_exib_un.columns:
-            # só calcula se tiver rateio > 0
-            rateio_en = Rateio.objects.filter(
-                despesa__tipo__nome__iexact='Energia Salão',
-                despesa__mes=str(mes),
-                despesa__ano=ano,
-                unidade__nome=un
-            ).first()
-            if rateio_en and rateio_en.valor > Decimal('0'):
-                # leituras anteriores e atuais dos 2 medidores
-                ant1 = LeituraEnergia.objects.filter(
-                    unidade__nome=un, medidor=1,
-                    mes=prev_mes, ano=prev_ano
-                ).first()
-                atu1 = LeituraEnergia.objects.filter(
-                    unidade__nome=un, medidor=1,
-                    mes=mes, ano=ano
-                ).first()
-                ant2 = LeituraEnergia.objects.filter(
-                    unidade__nome=un, medidor=2,
-                    mes=prev_mes, ano=prev_ano
-                ).first()
-                atu2 = LeituraEnergia.objects.filter(
-                    unidade__nome=un, medidor=2,
-                    mes=mes, ano=ano
-                ).first()
-
-                diff1 = (atu1.leitura - ant1.leitura) if (ant1 and atu1) else 0
-                diff2 = (atu2.leitura - ant2.leitura) if (ant2 and atu2) else 0
-                energia = max(diff1, 0) + max(diff2, 0)
-            else:
-                energia = 0
-
-            energia_map[un] = energia
+        # for un in df_exib_un.columns:
+        #     # só calcula se tiver rateio > 0
+        #     rateio_en = Rateio.objects.filter(
+        #         despesa__tipo__nome__iexect='Energia Salão',
+        #         despesa__mes=str(mes),
+        #         despesa__ano=ano,
+        #         unidade__nome=un
+        #     ).first()
+        #     if rateio_en and rateio_en.valor > Decimal('0'):
+        #         # leituras anteriores e atuais dos 2 medidores
+        #         ant1 = LeituraEnergia.objects.filter(
+        #             unidade__nome=un, medidor=1,
+        #             mes=prev_mes, ano=prev_ano
+        #         ).first()
+        #         atu1 = LeituraEnergia.objects.filter(
+        #             unidade__nome=un, medidor=1,
+        #             mes=mes, ano=ano
+        #         ).first()
+        #         ant2 = LeituraEnergia.objects.filter(
+        #             unidade__nome=un, medidor=2,
+        #             mes=prev_mes, ano=prev_ano
+        #         ).first()
+        #         atu2 = LeituraEnergia.objects.filter(
+        #             unidade__nome=un, medidor=2,
+        #             mes=mes, ano=ano
+        #         ).first()
+        #
+        #         diff1 = (atu1.leitura - ant1.leitura) if (ant1 and atu1) else 0
+        #         diff2 = (atu2.leitura - ant2.leitura) if (ant2 and atu2) else 0
+        #         energia = max(diff1, 0) + max(diff2, 0)
+        #     else:
+        #         energia = 0
+        #
+        #     energia_map[un] = energia
 
         gas_map = {}
         agua_map = {}
@@ -1853,7 +1854,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         df_exib_un.loc['TOTAL BOLETO']    = df_exib_un.sum(axis=0)
         df_exib_un.loc['Consumo Gás m³']  = pd.Series(gas_map)
         df_exib_un.loc['Consumo Água m³'] = pd.Series(agua_map)
-        df_exib_un.loc['Consumo Energia Salão'] = pd.Series(energia_map)
 
         df_exib_un.index.name = 'Tipo'
 
@@ -1876,6 +1876,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         else:
             en_kwh_tot = en_custo = Decimal('0')
         rows = []
+        energia_map = {}
 
         for un in Unidade.objects.order_by('nome'):
             # consumo você já calcula normalmente
@@ -1909,6 +1910,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             diff1 = (lk1_val - la1_val) if (la1_val is not None and lk1_val is not None) else 0
             diff2 = (lk2_val - la2_val) if (la2_val is not None and lk2_val is not None) else 0
             cons_en = max(diff1, 0) + max(diff2, 0)
+            energia_map[un.nome] = cons_en
 
             la1 = la1_val if la1_val is not None else '-'
             lk1 = lk1_val if lk1_val is not None else '-'
@@ -2048,6 +2050,10 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         )
 
         df_leituras.replace(0, pd.NA, inplace=True)
+
+        df_exib_un = df_exib_un.set_index('Despesas Condomínio')
+        df_exib_un.loc['Consumo Energia Salão'] = pd.Series(energia_map)
+        df_exib_un = df_exib_un.reset_index()
 
         buffer = io.BytesIO()
         # É aqui que abre o único 'with'
