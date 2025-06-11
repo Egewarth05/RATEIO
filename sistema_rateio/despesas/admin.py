@@ -1681,7 +1681,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
         # 3) monta DataFrame RATEIO achatado
         rows = []
-        energia_map = {}
         for r in rateios:
             rows.append({
                 'Unidade':      r.unidade.nome,
@@ -1910,7 +1909,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             diff1 = (lk1_val - la1_val) if (la1_val is not None and lk1_val is not None) else 0
             diff2 = (lk2_val - la2_val) if (la2_val is not None and lk2_val is not None) else 0
             cons_en = max(diff1, 0) + max(diff2, 0)
-            energia_map[un.nome] = cons_en
+            energia_map[un.nome] = round(cons_en, 3)
 
             la1 = la1_val if la1_val is not None else '-'
             lk1 = lk1_val if lk1_val is not None else '-'
