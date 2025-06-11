@@ -2277,8 +2277,13 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                     # cabeçalho
                     ws2.set_row(0, None, header_fmt)
 
-                    # monta número de linhas até o TOTAL BOLETO
-                    total_row_exib = len(tipos) + 1
+                    idx_total = df_exib_un.index[
+                        df_exib_un['Despesas Condomínio'] == 'TOTAL BOLETO'
+                    ].tolist()
+                    if idx_total:
+                        total_row_exib = idx_total[0] + 1  # +1 para o cabeçalho
+                    else:
+                        total_row_exib = len(tipos) + 1
 
                     # TOTAL BOLETO em negrito e moeda
                     ws2.set_row(total_row_exib, None, bold_currency_fmt)
