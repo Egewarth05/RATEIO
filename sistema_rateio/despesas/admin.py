@@ -2214,11 +2214,11 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
                     # só calcula consumo se existir leitura atual em pelo menos um medidor
                     f_cons = f'=IF(AND({m1}="",{m2}=""),0,({m1}-{a1})+({m2}-{a2}))'
-                    ws3.write_formula(row, c_cons, f_cons, number4_fmt)
+                #    ws3.write_formula(row, c_cons, f_cons, number4_fmt)
 
                     # só calcula valor se houver consumo
                     f_val  = f'=IF(AND({m1}="",{m2}=""),0,{cons_cell}*{uso})'
-                    ws3.write_formula(row, c_val, f_val, currency_fmt)
+                #    ws3.write_formula(row, c_val, f_val, currency_fmt)
 
             # --- 8.2) crie seus formatos ---
             workbook    = writer.book
