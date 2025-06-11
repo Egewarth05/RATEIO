@@ -1999,18 +1999,19 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
               .round(3)
         )
 
-        df_leituras['Energia – Med1 Atu.'] = (
-            df_leituras['Energia – Med1 Atu.']
-              .replace('-', np.nan)
-              .replace('', np.nan)
-              .astype(float)
-        )
-        df_leituras['Energia – Med2 Atu.'] = (
-            df_leituras['Energia – Med2 Atu.']
-              .replace('-', np.nan)
-              .replace('', np.nan)
-              .astype(float)
-        )
+        for col in [
+            'Energia – Med1 Ant.',
+            'Energia – Med1 Atu.',
+            'Energia – Med2 Ant.',
+            'Energia – Med2 Atu.',
+        ]:
+            df_leituras[col] = (
+                df_leituras[col]
+                  .replace('-', np.nan)
+                  .replace('', np.nan)
+                  .astype(float)
+                  .round(4)
+            )
 
         # máscara: linhas onde as duas colunas são NaN
         mask_sem_leitura = (
@@ -2327,11 +2328,18 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 })
 
                 # formato de consumo com 4 casas e centralizado
-                number4_fmt = workbook.add_format({
+                consumo_fmt = workbook.add_format({
                     'num_format': '0,000',
                     'align':      'center',
                     'valign':     'vcenter',
                 })
+
+                leitura_ener_fmt = workbook.add_format({
+                    'num_format': '0,0000',
+                    'align':      'center',
+                    'valign':     'vcenter',
+                })
+
                 # cria um format só com alinhamento central
                 center_fmt = workbook.add_format({
                     'align':  'center',
@@ -2375,10 +2383,18 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 gas_idx  = [idx[c] for c in cols if c.startswith('Gás')]
                 ener_idx = [idx[c] for c in cols if c.startswith('Energia')]
                 cons_idx = [idx[c] for c in cols if 'Consumo' in c]
+                ener_leitura_idx = [
+                    idx[c] for c in cols
+                    if 'Energia' in c and 'Med' in c
+                ]
 
                 # aplica o number4_fmt nas colunas de consumo
                 for ci in cons_idx:
-                    ws3.set_column(ci, ci, 12, number4_fmt)
+                    ws3.set_column(ci, ci, 12, consumo_fmt)
+                # aplica 4 casas às leituras de energia
+                for ci in ener_leitura_idx:
+                    ws3.set_column(ci, ci, 12, leitura_ener_fmt)
+
 
                 # helper para pintar bloco
                 def paint(cols_idx, fmt):
