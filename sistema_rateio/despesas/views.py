@@ -331,6 +331,49 @@ def nova_despesa(request):
             except:
                 return default
 
+        # === MATERIAL/SERVIÇO DE CONSUMO ===
+        nf_entries = []
+        if tipo.nome.lower() == "material/serviço de consumo":
+            idx = 0
+            while True:
+                key = f'nf_valor_{idx}'
+                if key not in request.POST:
+                    break
+                val = parse_float(request.POST.get(key))
+                forn = request.POST.get(f'nf_fornecedor_{idx}', '').strip()
+                hist = request.POST.get(f'nf_historico_{idx}', '').strip()
+                num  = request.POST.get(f'nf_numero_{idx}', '').strip()
+                tipo_nf = request.POST.get(f'nf_tipo_{idx}', 'com')
+                if forn or hist or num or val:
+                    nf_entries.append({
+                        'fornecedor': forn,
+                        'historico': hist,
+                        'numero': num,
+                        'tipo': tipo_nf,
+                        'valor': val,
+                    })
+                idx += 1
+
+            total_nf = sum(e['valor'] for e in nf_entries)
+            despesa.nf_info = nf_entries
+            despesa.valor_total = total_nf
+            despesa.save()
+            if fracoes_map:
+                for u in unidades:
+                    pct = fracoes_map.get(u.id, 0)
+                    v   = total_nf * pct
+                    valores_por_unidade[u] = v
+                    total += v
+            else:
+                share = total_nf / len(unidades) if unidades else 0
+                for u in unidades:
+                    valores_por_unidade[u] = share
+                total = total_nf
+            for u, v in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+            messages.success(request, 'Despesa cadastrada com sucesso!')
+            return redirect('lista_despesas')
+
         # === GÁS ===
         if tipo.nome.lower() == "gás":
             recarga = parse_float(request.POST.get('recarga'))
