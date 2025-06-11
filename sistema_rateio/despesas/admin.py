@@ -1757,6 +1757,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 .values_list('nome', flat=True)
         )
         df_exib_un = df_exib_un.reindex(tipos).fillna(0)
+        df_exib_un.drop('Fatura Energia Elétrica', errors='ignore', inplace=True)
 
         # calcula consumo de gás e água por unidade
         energia_map = {}
