@@ -490,6 +490,43 @@
       </div>
     </div>
 
+    <!-- BLOCO MATERIAL/SERVIÇO -->
+    <div id="nf-block" style="display:none;" class="mb-4">
+      <h5>Notas Fiscais</h5>
+      <table class="table table-bordered" id="nf-table">
+        <thead>
+          <tr>
+            <th>Fornecedor</th>
+            <th>Histórico</th>
+            <th>NF nº</th>
+            <th>Tipo</th>
+            <th>R$</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="nf-body">
+          <tr>
+            <td><input type="text" name="nf_fornecedor_0" class="form-control"></td>
+            <td><input type="text" name="nf_historico_0" class="form-control"></td>
+            <td><input type="text" name="nf_numero_0" class="form-control"></td>
+            <td>
+              <select name="nf_tipo_0" class="form-select">
+                <option value="com">Com a Sala</option>
+                <option value="sem">Sem a Sala</option>
+              </select>
+            </td>
+            <td><input type="text" name="nf_valor_0" class="form-control valor-reais"></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+      <button type="button" id="add-nf" class="btn btn-sm btn-secondary mb-2">Adicionar NF</button>
+      <div>
+        <label><strong>Total (R$):</strong></label>
+        <input id="nf-total" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+      </div>
+    </div>
+
     <!-- RATEIO PADRÃO -->
     <div id="bloco-rateio-padrao" style="display:none;"> <h5 class="mt-4">Rateio por Unidade</h5>
         <table class="table table-bordered w-100" id="rateio-padrao"> <thead><tr><th>Unidade</th><th>Valor (R$)</th></tr></thead>
@@ -597,7 +634,11 @@
           energiaBlock     = document.getElementById('energia-block'),
           energiaFaturaEl  = document.querySelector('[name="energia_fatura"]'),
           energiaKwhTotal  = document.querySelector('[name="energia_kwh_total"]'),
-          energiaCustoEl   = document.getElementById('energia_custo_kwh');
+          energiaCustoEl   = document.getElementById('energia_custo_kwh'),
+          nfBlock      = document.getElementById('nf-block'),
+          nfBody       = document.getElementById('nf-body'),
+          nfTotal      = document.getElementById('nf-total');
+    const materialTipo = 'material/serviço de consumo';
 
     function atualizaRate() {
           const f = parseFloat(af.value.replace(',', '.')) || 0;
@@ -612,6 +653,41 @@
       at.addEventListener('input', atualizaRate);
       atualizaRate();
 
+    function nfTotalCalc(){
+        let soma = 0;
+        nfBody.querySelectorAll('input[name^="nf_valor_"]').forEach(inp=>{
+          const v = parseFloat(inp.value.replace(',', '.'))||0;
+          soma += v;
+        });
+        nfTotal.value = soma.toFixed(2).replace('.', ',');
+        document.getElementById('id_valor_total').value = soma.toFixed(2);
+      }
+
+      document.getElementById('add-nf').addEventListener('click', ()=>{
+        const idx = nfBody.querySelectorAll('tr').length;
+        const row = document.createElement('tr');
+        row.innerHTML = `<td><input type="text" name="nf_fornecedor_${idx}" class="form-control"></td>`+
+                        `<td><input type="text" name="nf_historico_${idx}" class="form-control"></td>`+
+                        `<td><input type="text" name="nf_numero_${idx}" class="form-control"></td>`+
+                        `<td><select name="nf_tipo_${idx}" class="form-select"><option value="com">Com a Sala</option><option value="sem">Sem a Sala</option></select></td>`+
+                        `<td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>`+
+                        `<td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>`;
+        nfBody.appendChild(row);
+      });
+
+      nfBlock.addEventListener('click', e=>{
+        if(e.target.classList.contains('remove-row')){
+          e.target.closest('tr').remove();
+          nfTotalCalc();
+        }
+      });
+
+      nfBlock.addEventListener('input', e=>{
+        if(e.target.name && e.target.name.startsWith('nf_valor_')){
+          nfTotalCalc();
+        }
+      });
+
       // lista de tipos que usam apenas o bloco "simples"
     const simplesText = [
       'serviço - faxina',
@@ -620,7 +696,6 @@
       'salário - síndico',
       'elevador',
       'material consumo (sem sala comercial)',
-      'material/serviço de consumo',
       'taxa boleto',
       'seguro 6x',
       'honorários contábeis',
@@ -700,6 +775,7 @@
         rs.style.display = 'none';
         rp.style.display = 'none';
         energiaBlock.style.display = 'none';
+        nfBlock.style.display = 'none';
 
         // Mostra apenas o bloco correto
         if (txt.includes('água')) {
@@ -718,6 +794,9 @@
             rg.style.display        = 'none'
             rs.style.display        = 'block'
             rp.style.display        = 'none'
+        }
+        else if (txt === materialTipo) {
+            nfBlock.style.display = 'block';
         }
         else if (simplesText.some(item => txt.includes(item.toLowerCase()))) {
             rs.style.display = 'block';
@@ -846,6 +925,7 @@
     kgInput     .addEventListener('input', calcVM3);
     m3kgInput   .addEventListener('input', calcVM3);
     calcVM3();
+    nfTotalCalc();
   });
   </script>
  <script>
