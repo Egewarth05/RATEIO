@@ -674,16 +674,22 @@
         document.getElementById('id_valor_total').value = (somaCom + somaSem).toFixed(2);
       }
 
+      function updateTipoColor(sel){
+        if(!sel) return;
+        sel.style.color = sel.value === 'sem' ? 'blue' : 'green';
+      }
+
       document.getElementById('add-nf').addEventListener('click', ()=>{
         const idx = nfBody.querySelectorAll('tr').length;
         const row = document.createElement('tr');
         row.innerHTML = `<td><input type="text" name="nf_fornecedor_${idx}" class="form-control"></td>`+
                         `<td><input type="text" name="nf_historico_${idx}" class="form-control"></td>`+
                         `<td><input type="text" name="nf_numero_${idx}" class="form-control"></td>`+
-                        `<td><select name="nf_tipo_${idx}" class="form-select"><option value="com">Com a Sala</option><option value="sem">Sem a Sala</option></select></td>`+
+                        `<td><select name="nf_tipo_${idx}" class="form-select"><option value="com" style="color:green;">Com a Sala</option><option value="sem" style="color:blue;">Sem a Sala</option></select></td>`+
                         `<td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>`+
                         `<td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>`;
         nfBody.appendChild(row);
+        updateTipoColor(row.querySelector('select[name^="nf_tipo_"]'));
         nfTotalCalc();
       });
 
@@ -695,7 +701,14 @@
       });
 
       nfBlock.addEventListener('input', e=>{
-        if(e.target.name && (e.target.name.startsWith('nf_valor_') || e.target.name.startsWith('nf_tipo_'))){
+        if(e.target.name && e.target.name.startsWith('nf_valor_')){
+          nfTotalCalc();
+        }
+      });
+
+      nfBlock.addEventListener('change', e=>{
+        if(e.target.name && e.target.name.startsWith('nf_tipo_')){
+          updateTipoColor(e.target);
           nfTotalCalc();
         }
       });
@@ -937,6 +950,7 @@
     kgInput     .addEventListener('input', calcVM3);
     m3kgInput   .addEventListener('input', calcVM3);
     calcVM3();
+    nfBody.querySelectorAll('select[name^="nf_tipo_"]').forEach(updateTipoColor);
     nfTotalCalc();
   });
   </script>
