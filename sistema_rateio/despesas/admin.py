@@ -2421,7 +2421,7 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 for col_idx in range(first_col, last_col + 1):
                     col_letter = xlsxwriter.utility.xl_col_to_name(col_idx)
                     formula = f"=SUM({col_letter}2:{col_letter}{n+1})"
-                    ws.write_formula(total_row, col_idx, formula, currency_fmt)
+                    ws.write_formula(total_row, col_idx, formula, bold_currency_fmt)
 
                 # --- 8.4) formata aba EXIBIÇÃO POR UNIDADE ---
                 if 'EXIBIÇÃO POR UNIDADE' in writer.sheets:
