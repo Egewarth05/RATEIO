@@ -386,14 +386,20 @@ def nova_despesa(request):
                 despesa_sem.valor_total = total_sem
                 despesa_sem.save()
 
+            fracoes_sem_map = {
+                f.unidade.id: float(f.percentual)
+                for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
+            } if tipo_sem else {}
+
             valores_com = {}
             valores_sem = {}
 
             if fracoes_map:
                 for u in unidades:
-                    pct = fracoes_map.get(u.id, 0)
-                    valores_com[u] = total_com * pct
-                    valores_sem[u] = total_sem * pct
+                    pct_com = fracoes_map.get(u.id, 0)
+                    pct_sem = fracoes_sem_map.get(u.id, 0)
+                    valores_com[u] = total_com * pct_com
+                    valores_sem[u] = total_sem * pct_sem
             else:
                 share_com = total_com / len(unidades) if unidades else 0
                 share_sem = total_sem / len(unidades) if unidades else 0
@@ -805,13 +811,19 @@ def editar_despesa(request, despesa_id):
             despesa_sem.valor_total = total_sem
             despesa_sem.save()
 
+        fracoes_sem_map = {
+            f.unidade.id: float(f.percentual)
+            for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
+        } if tipo_sem else {}
+
         valores_com = {}
         valores_sem = {}
         if fracoes_map:
             for u in unidades:
-                pct = fracoes_map.get(u.id, 0)
-                valores_com[u] = total_com * pct
-                valores_sem[u] = total_sem * pct
+                pct_com = fracoes_map.get(u.id, 0)
+                pct_sem = fracoes_sem_map.get(u.id, 0)
+                valores_com[u] = total_com * pct_com
+                valores_sem[u] = total_sem * pct_sem
         else:
             share_com = total_com / len(unidades) if unidades else 0
             share_sem = total_sem / len(unidades) if unidades else 0
