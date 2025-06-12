@@ -759,6 +759,32 @@ def ver_rateio(request, despesa_id):
     total_rateio = rateios.aggregate(total=Sum('valor'))['total'] or 0
     valor_exibido = despesa.valor_total
 
+    valor_com_sala = Decimal('0')
+    valor_sem_sala = Decimal('0')
+    rateio_com_sala = {}
+    rateio_sem_sala = {}
+    if despesa.tipo.nome.lower() == 'material/servi\u00e7o de consumo':
+        nf_info = despesa.nf_info or []
+        for item in nf_info:
+            try:
+                valor = Decimal(str(item.get('valor', 0)))
+            except Exception:
+                valor = Decimal('0')
+            if item.get('tipo') == 'sem':
+                valor_sem_sala += valor
+            else:
+                valor_com_sala += valor
+
+        total_val = Decimal(str(despesa.valor_total)) if despesa.valor_total else Decimal('0')
+        for r in rateios:
+            pct = (Decimal(str(r.valor)) / total_val) if total_val else Decimal('0')
+            rateio_com_sala[r.id] = (valor_com_sala * pct).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            rateio_sem_sala[r.id] = (valor_sem_sala * pct).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+
     if despesa.tipo.nome.lower() == 'energia áreas comuns':
         # 1) pega fatura e custo_kwh da última “Energia Salão” desse mês/ano
         energia = (
@@ -1022,11 +1048,23 @@ def ver_rateio(request, despesa_id):
         })
 
     # --- PADRÃO ---
-    return render(request, 'despesas/ver_rateio.html', {
+    context = {
         'despesa': despesa,
         'rateios': rateios,
-        'valor_exibido':  valor_exibido,
-    })
+        'valor_exibido': valor_exibido,
+    }
+    if despesa.tipo.nome.lower() == 'material/servi\u00e7o de consumo':
+        context.update({
+            'valor_com_sala': float(valor_com_sala),
+            'valor_sem_sala': float(valor_sem_sala),
+            'rateio_com_sala': {
+                k: float(v) for k, v in rateio_com_sala.items()
+            },
+            'rateio_sem_sala': {
+                k: float(v) for k, v in rateio_sem_sala.items()
+            },
+        })
+    return render(request, 'despesas/ver_rateio.html', context)
 
 
 def ajax_ultima_agua(request):
