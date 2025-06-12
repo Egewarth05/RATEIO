@@ -189,7 +189,6 @@
 
     </div>
 
-
 <script>
   document.addEventListener('DOMContentLoaded', function() {
     const ar = document.querySelector('[name="agua_valor_m3"]');
@@ -679,19 +678,23 @@
         sel.style.color = sel.value === 'sem' ? 'blue' : 'green';
       }
 
-      document.getElementById('add-nf').addEventListener('click', ()=>{
-        const idx = nfBody.querySelectorAll('tr').length;
-        const row = document.createElement('tr');
-        row.innerHTML = `<td><input type="text" name="nf_fornecedor_${idx}" class="form-control"></td>`+
-                        `<td><input type="text" name="nf_historico_${idx}" class="form-control"></td>`+
-                        `<td><input type="text" name="nf_numero_${idx}" class="form-control"></td>`+
-                        `<td><select name="nf_tipo_${idx}" class="form-select"><option value="com" style="color:green;">Com a Sala</option><option value="sem" style="color:blue;">Sem a Sala</option></select></td>`+
-                        `<td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>`+
-                        `<td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>`;
-        nfBody.appendChild(row);
-        updateTipoColor(row.querySelector('select[name^="nf_tipo_"]'));
-        nfTotalCalc();
-      });
+      document.getElementById('add-nf').addEventListener('click', () => {
+          const idx = nfBody.querySelectorAll('tr').length;
+          const row = document.createElement('tr');
+          row.innerHTML =
+            `<td><input type="text" name="nf_fornecedor_${idx}" class="form-control"></td>` +
+            `<td><input type="text" name="nf_historico_${idx}" class="form-control"></td>` +
+            `<td><input type="text" name="nf_numero_${idx}" class="form-control"></td>` +
+            `<td><select name="nf_tipo_${idx}" class="form-select"><option value="com" style="color:green;">Com a Sala</option><option value="sem" style="color:blue;">Sem a Sala</option></select></td>` +
+            `<td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>` +
+            `<td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>`;
+          nfBody.appendChild(row);
+          updateTipoColor(row.querySelector('select[name^="nf_tipo_"]'));
+          const newElems = row.querySelectorAll('input, select');
+          fields.push(...newElems);
+          newElems.forEach(setupEnterNavigation);
+          nfTotalCalc();
+        });
 
       nfBlock.addEventListener('click', e=>{
         if(e.target.classList.contains('remove-row')){
@@ -836,23 +839,30 @@
 
         // formatação ENTER/TAB
         const formEl = document.querySelector('form[method="post"]');
-        const fields = Array.from(formEl.querySelectorAll('input:not([type=hidden]), select'));
+        let fields = Array.from(formEl.querySelectorAll('input:not([type=hidden]), select'));
         function formatField(f) {
           if (!f.classList.contains('valor-reais')) return;
           const v = parseFloat(f.value.replace(',', '.'));
           if (!isNaN(v)) f.value = v.toFixed(2).replace('.', ',');
         }
-        fields.forEach((f,i) => {
-          f.addEventListener('keydown', e => {
-            if (e.key==='Enter') {
-              e.preventDefault();
-              formatField(f);
-              if (fields[i+1]) fields[i+1].focus();
-            } else if (e.key==='Tab') {
-              formatField(f);
-            }
-          }, {capture:true});
-        });
+        function setupEnterNavigation(el) {
+          el.addEventListener(
+            'keydown',
+            e => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                formatField(el);
+                const idx = fields.indexOf(el);
+                if (fields[idx + 1]) fields[idx + 1].focus();
+              } else if (e.key === 'Tab') {
+                formatField(el);
+              }
+            },
+            { capture: true }
+          );
+        }
+
+        fields.forEach(setupEnterNavigation);
         formEl.querySelectorAll('input.valor-reais').forEach(f =>
           f.addEventListener('blur', ()=>formatField(f))
         );
