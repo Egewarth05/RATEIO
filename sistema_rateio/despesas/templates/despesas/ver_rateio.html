@@ -222,16 +222,20 @@
         {% endfor %}
       </tbody>
     </table>
-  {% endif %}
 
   {% else %}
     {# 7) DESPESAS PADRÃO #}
+    <p>
+      <strong>Total:</strong>
+      R$ {{ valor_exibido|floatformat:2 }}
+    </p>
     <h3>Rateio Padrão</h3>
     <table class="table table-bordered">
       <thead>
         <tr>
           <th>Unidade</th>
           <th>Valor (R$)</th>
+          <th>Ação</th>
         </tr>
       </thead>
       <tbody>
@@ -244,11 +248,40 @@
                 Apartamento {{ r.unidade.nome }}
               {% endif %}
             </td>
-            <td>R$ {{ r.valor|floatformat:2 }}</td>
+
+            {# valor + input oculto #}
+            <td>
+              <span id="valor-display-{{ r.id }}">R$ {{ r.valor|floatformat:2 }}</span>
+              <input
+                type="number"
+                step="0.01"
+                id="valor-input-{{ r.id }}"
+                value="{{ r.valor|floatformat:2 }}"
+                class="form-control d-none"
+                style="width: 100px;"
+              >
+            </td>
+
+            {# botões de editar / salvar / cancelar #}
+            <td>
+              <button
+                class="btn btn-sm btn-light editar-btn"
+                onclick="editarRateio({{ r.id }})"
+              >✏️</button>
+              <button
+                class="btn btn-sm btn-success salvar-btn d-none"
+                onclick="salvarRateio({{ r.id }})"
+              >💾</button>
+              <button
+                class="btn btn-sm btn-danger cancelar-btn d-none"
+                onclick="cancelarEdicao({{ r.id }})"
+              >✖</button>
+            </td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+
   {% endif %}
 
   <a href="{% url 'lista_despesas' %}" class="btn btn-secondary mt-3">← Voltar</a>
