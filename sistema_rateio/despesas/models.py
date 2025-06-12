@@ -12,6 +12,7 @@ MESES_CHOICES = [
 
 BASE_TIPOS = [
     'Reparos/Reforma',
+    'Reparo/Reforma (Sem a Sala)',
     'Salário - Síndico',
     'Elevador',
     'Serviço - Faxina',
@@ -219,6 +220,18 @@ class DespesaSemSala(Despesa):
         proxy = True
         verbose_name = "Material Consumo (Sem Sala Comercial)"
         verbose_name_plural = "Material Consumo (Sem Sala Comercial)"
+
+class DespesaReparoComSala(Despesa):
+    class Meta:
+        proxy = True
+        verbose_name = "Reparos/Reforma (Com Sala)"
+        verbose_name_plural = "Reparos/Reforma (Com Sala)"
+
+class DespesaReparoSemSala(Despesa):
+    class Meta:
+        proxy = True
+        verbose_name = "Reparos/Reforma (Sem Sala)"
+        verbose_name_plural = "Reparos/Reforma (Sem Sala)"
 
 class DespesaAreasComuns(Despesa):
     class Meta:
