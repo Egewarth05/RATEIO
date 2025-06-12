@@ -47,7 +47,9 @@ from .models import (
     LeituraEnergia,
     ExportarXlsx,
     FundoReserva,
-    DespesaAreasComuns
+    DespesaAreasComuns,
+    DespesaComSala,
+    DespesaSemSala,
     )
 
 BASE_TIPOS = [
@@ -64,6 +66,45 @@ BASE_TIPOS = [
     'Água',
     'Honorários Contábeis',
 ]
+
+@admin.register(DespesaComSala)
+class DespesaComSalaAdmin(admin.ModelAdmin):
+    list_display = ("id", "mes", "ano", "valor_com_sala")
+    list_filter  = ("mes", "ano")
+    ordering     = ("-ano", "-mes")
+    readonly_fields = ("mes", "ano", "valor_com_sala")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(tipo__nome__iexact="material/serviço de consumo")
+
+    def valor_com_sala(self, obj):
+        total = Decimal("0")
+        for nf in obj.nf_info or []:
+            if (nf.get("tipo") or "").lower() != "sem":
+                total += Decimal(str(nf.get("valor", 0)))
+        return f"{total:.2f}"
+    valor_com_sala.short_description = "Com Sala (R$)"
+
+
+@admin.register(DespesaSemSala)
+class DespesaSemSalaAdmin(admin.ModelAdmin):
+    list_display = ("id", "mes", "ano", "valor_sem_sala")
+    list_filter  = ("mes", "ano")
+    ordering     = ("-ano", "-mes")
+    readonly_fields = ("mes", "ano", "valor_sem_sala")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(tipo__nome__iexact="material/serviço de consumo")
+
+    def valor_sem_sala(self, obj):
+        total = Decimal("0")
+        for nf in obj.nf_info or []:
+            if (nf.get("tipo") or "").lower() == "sem":
+                total += Decimal(str(nf.get("valor", 0)))
+        return f"{total:.2f}"
+    valor_sem_sala.short_description = "Sem Sala (R$)"
 
 # Inline para mostrar Frações dentro de TipoDespesa
 class FracaoPorTipoDespesaInline(admin.TabularInline):
