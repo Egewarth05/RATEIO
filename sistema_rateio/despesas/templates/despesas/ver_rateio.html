@@ -224,6 +224,33 @@
     </table>
   {% endif %}
 
+  {% else %}
+    {# 7) DESPESAS PADRÃO #}
+    <h3>Rateio Padrão</h3>
+    <table class="table table-bordered">
+      <thead>
+        <tr>
+          <th>Unidade</th>
+          <th>Valor (R$)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rateios %}
+          <tr>
+            <td>
+              {% if 'sala' in r.unidade.nome|lower %}
+                Sala Comercial {{ r.unidade.nome|slice:'5:' }}
+              {% else %}
+                Apartamento {{ r.unidade.nome }}
+              {% endif %}
+            </td>
+            <td>R$ {{ r.valor|floatformat:2 }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
   <a href="{% url 'lista_despesas' %}" class="btn btn-secondary mt-3">← Voltar</a>
 {% endblock %}
 
