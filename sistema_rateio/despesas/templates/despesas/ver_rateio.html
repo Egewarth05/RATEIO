@@ -8,24 +8,9 @@
   Rateio da Despesa: {{ despesa.tipo.nome }} – {{ despesa.get_mes_display }}/{{ despesa.ano }}
 </h2>
 
-<<<<<<< HEAD
-{% if despesa.tipo.nome|lower == "energia salão" %}
-  <p><strong>Total:</strong> R$ {{ energia_total|floatformat:2 }}</p>
-    <p>
-    <strong>Total Leituras:</strong>
-    {{ total_leituras|floatformat:2 }}
-  </p>
-
-{% else %}
-    <p><strong>Total:</strong>
-       R$ {{ total_rateio|default:despesa.valor_total|floatformat:2 }}
-    </p>
-{% endif %}
-=======
 {% if despesa.tipo.nome|lower == "energia áreas comuns" %}
   {# Para “Energia Áreas Comuns”, mostre o valor calculado na view: valor_exibido #}
   <p><strong>Total:</strong> R$ {{ valor_exibido|floatformat:2 }}</p>
->>>>>>> 1807d19 (Lero Lero)
 
 {% elif despesa.tipo.nome|lower == "energia salão" %}
   <p><strong>Total:</strong> R$ {{ energia_total|floatformat:2 }}</p>
@@ -41,7 +26,6 @@
     {% endif %}
   </p>
 {% endif %}
-
 
 {# --- GÁS --- #}
 {% if despesa.tipo.nome|lower == "gás" %}
@@ -213,8 +197,13 @@
     <thead>
       <tr>
         <th>Unidade</th>
-        <th>Valor (R$)</th>
-        <th>Ação</th>
+        {% if despesa.tipo.nome|lower == 'material/servi\u00e7o de consumo' %}
+          <th>Com Sala (R$)</th>
+          <th>Sem Sala (R$)</th>
+        {% else %}
+          <th>Total (R$)</th>
+        {% endif %}
+        <th>A\u00e7\u00e3o</th>
       </tr>
     </thead>
     <tbody>
@@ -227,6 +216,16 @@
             Apartamento {{ rateio.unidade.nome }}
           {% endif %}
         </td>
+        {% if despesa.tipo.nome|lower == 'material/servi\u00e7o de consumo' %}
+        <td>
+          <span id="valor-com-display-{{ rateio.id }}">R$ {{ rateio_com_sala|get_item:rateio.id|floatformat:2 }}</span>
+          <input type="number" step="0.01" id="valor-com-input-{{ rateio.id }}" value="{{ rateio_com_sala|get_item:rateio.id|floatformat:2 }}" class="form-control d-none" style="width: 100px;">
+        </td>
+        <td>
+          <span id="valor-sem-display-{{ rateio.id }}">R$ {{ rateio_sem_sala|get_item:rateio.id|floatformat:2 }}</span>
+          <input type="number" step="0.01" id="valor-sem-input-{{ rateio.id }}" value="{{ rateio_sem_sala|get_item:rateio.id|floatformat:2 }}" class="form-control d-none" style="width: 100px;">
+        </td>
+        {% else %}
         <td>
           <span id="valor-display-{{ rateio.id }}">R$ {{ rateio.valor|floatformat:2 }}</span>
           <input type="number" step="0.01"
@@ -235,6 +234,7 @@
                  class="form-control d-none"
                  style="width: 100px;">
         </td>
+        {% endif %}
         <td>
           <button class="btn btn-sm btn-light editar-btn" onclick="editarRateio({{ rateio.id }})">✏️</button>
           <button class="btn btn-sm btn-success salvar-btn d-none" onclick="salvarRateio({{ rateio.id }})">💾</button>
@@ -251,23 +251,40 @@
 
 {% block scripts %}
 <script>
-  function editarRateio(id) {
-    document.getElementById(`valor-display-${id}`).classList.add('d-none');
-    document.getElementById(`valor-input-${id}`).classList.remove('d-none');
-    document.getElementById(`valor-input-${id}`).dataset.oldValue =
-      document.getElementById(`valor-input-${id}`).value;
-    document.getElementById(`valor-input-${id}`).focus();
-    document.querySelector(`.editar-btn[onclick="editarRateio(${id})"]`)
-      .classList.add('d-none');
-    document.querySelector(`.salvar-btn[onclick="salvarRateio(${id})"]`)
-      .classList.remove('d-none');
-    document.querySelector(`.cancelar-btn[onclick="cancelarEdicao(${id})"]`)
-      .classList.remove('d-none');
-  }
+    const isMaterial = '{{ despesa.tipo.nome|lower }}' === 'material/serviço de consumo';
+    function editarRateio(id) {
+        if (isMaterial) {
+          ['com','sem'].forEach(pref => {
+            document.getElementById(`valor-${pref}-display-${id}`).classList.add('d-none');
+            const inp = document.getElementById(`valor-${pref}-input-${id}`);
+            inp.classList.remove('d-none');
+            inp.dataset.oldValue = inp.value;
+          });
+        } else {
+          document.getElementById(`valor-display-${id}`).classList.add('d-none');
+          const inp = document.getElementById(`valor-input-${id}`);
+          inp.classList.remove('d-none');
+          inp.dataset.oldValue = inp.value;
+          inp.focus();
+        }
+        document.querySelector(`.editar-btn[onclick="editarRateio(${id})"]`)
+          .classList.add('d-none');
+        document.querySelector(`.salvar-btn[onclick="salvarRateio(${id})"]`)
+          .classList.remove('d-none');
+        document.querySelector(`.cancelar-btn[onclick="cancelarEdicao(${id})"]`)
+          .classList.remove('d-none');
+      }
 
   function salvarRateio(id) {
-    const input = document.getElementById(`valor-input-${id}`);
-    const novoValor = parseFloat(input.value.replace(',', '.')) || 0;
+    let novoValor = 0;
+    if (isMaterial) {
+      const com = parseFloat(document.getElementById(`valor-com-input-${id}`).value.replace(',', '.')) || 0;
+      const sem = parseFloat(document.getElementById(`valor-sem-input-${id}`).value.replace(',', '.')) || 0;
+      novoValor = com + sem;
+    } else {
+      const input = document.getElementById(`valor-input-${id}`);
+      novoValor = parseFloat(input.value.replace(',', '.')) || 0;
+    }
     fetch(`/despesas/editar_rateio/${id}/`, {
       method: 'POST',
       headers: {
@@ -284,11 +301,21 @@
   }
 
   function cancelarEdicao(id) {
-    const inp = document.getElementById(`valor-input-${id}`);
-    const disp = document.getElementById(`valor-display-${id}`);
-    inp.value = inp.dataset.oldValue;
-    inp.classList.add('d-none');
-    disp.classList.remove('d-none');
+    if (isMaterial) {
+      ['com','sem'].forEach(pref => {
+        const inp = document.getElementById(`valor-${pref}-input-${id}`);
+        const disp = document.getElementById(`valor-${pref}-display-${id}`);
+        inp.value = inp.dataset.oldValue;
+        inp.classList.add('d-none');
+        disp.classList.remove('d-none');
+      });
+    } else {
+      const inp = document.getElementById(`valor-input-${id}`);
+      const disp = document.getElementById(`valor-display-${id}`);
+      inp.value = inp.dataset.oldValue;
+      inp.classList.add('d-none');
+      disp.classList.remove('d-none');
+    }
     document.querySelector(`.editar-btn[onclick="editarRateio(${id})"]`)
       .classList.remove('d-none');
     document.querySelector(`.salvar-btn[onclick="salvarRateio(${id})"]`)
