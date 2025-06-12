@@ -197,13 +197,13 @@
     <thead>
       <tr>
         <th>Unidade</th>
-        {% if despesa.tipo.nome|lower == 'material/servi\u00e7o de consumo' %}
+        {% if despesa.tipo.nome|lower == 'material/serviço de consumo' %}
           <th>Com Sala (R$)</th>
           <th>Sem Sala (R$)</th>
         {% else %}
           <th>Total (R$)</th>
         {% endif %}
-        <th>A\u00e7\u00e3o</th>
+        <th>Ação</th>
       </tr>
     </thead>
     <tbody>
@@ -216,7 +216,7 @@
             Apartamento {{ rateio.unidade.nome }}
           {% endif %}
         </td>
-        {% if despesa.tipo.nome|lower == 'material/servi\u00e7o de consumo' %}
+        {% if despesa.tipo.nome|lower == 'material/serviço de consumo' %}
         <td>
           <span id="valor-com-display-{{ rateio.id }}">R$ {{ rateio_com_sala|get_item:rateio.id|floatformat:2 }}</span>
           <input type="number" step="0.01" id="valor-com-input-{{ rateio.id }}" value="{{ rateio_com_sala|get_item:rateio.id|floatformat:2 }}" class="form-control d-none" style="width: 100px;">
