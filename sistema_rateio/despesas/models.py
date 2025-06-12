@@ -208,6 +208,18 @@ class Despesa(models.Model):
             return (self.agua_leituras or {}).get('params', {}).get('valor_m3_agua')
         return None
 
+class DespesaComSala(Despesa):
+    class Meta:
+        proxy = True
+        verbose_name = "Material/Serviço de Consumo (Com Sala)"
+        verbose_name_plural = "Material/Serviço de Consumo (Com Sala)"
+
+class DespesaSemSala(Despesa):
+    class Meta:
+        proxy = True
+        verbose_name = "Material Consumo (Sem Sala Comercial)"
+        verbose_name_plural = "Material Consumo (Sem Sala Comercial)"
+
 class DespesaAreasComuns(Despesa):
     class Meta:
         proxy = True
