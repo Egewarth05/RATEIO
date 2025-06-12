@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Editar Despesa{% endblock %}
+{% block content %}
+<h1 class="mb-4">Editar Despesa</h1>
+<form method="post" class="card p-4">
+  {% csrf_token %}
+  <table class="table table-bordered" id="nf-table">
+    <thead>
+      <tr>
+        <th>Fornecedor</th>
+        <th>Histórico</th>
+        <th>NF nº</th>
+        <th>Tipo</th>
+        <th>R$</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="nf-body">
+      {% for nf in nf_info %}
+      <tr>
+        <td><input type="text" name="nf_fornecedor_{{ forloop.counter0 }}" value="{{ nf.fornecedor }}" class="form-control"></td>
+        <td><input type="text" name="nf_historico_{{ forloop.counter0 }}" value="{{ nf.historico }}" class="form-control"></td>
+        <td><input type="text" name="nf_numero_{{ forloop.counter0 }}" value="{{ nf.numero }}" class="form-control"></td>
+        <td>
+          <select name="nf_tipo_{{ forloop.counter0 }}" class="form-select">
+            <option value="com" {% if nf.tipo == 'com' %}selected{% endif %} style="color:green;">Com a Sala</option>
+            <option value="sem" {% if nf.tipo == 'sem' %}selected{% endif %} style="color:blue;">Sem a Sala</option>
+          </select>
+        </td>
+        <td><input type="text" name="nf_valor_{{ forloop.counter0 }}" value="{{ nf.valor|floatformat:2 }}" class="form-control valor-reais"></td>
+        <td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td><input type="text" name="nf_fornecedor_0" class="form-control"></td>
+        <td><input type="text" name="nf_historico_0" class="form-control"></td>
+        <td><input type="text" name="nf_numero_0" class="form-control"></td>
+        <td>
+          <select name="nf_tipo_0" class="form-select">
+            <option value="com" style="color:green;">Com a Sala</option>
+            <option value="sem" style="color:blue;">Sem a Sala</option>
+          </select>
+        </td>
+        <td><input type="text" name="nf_valor_0" class="form-control valor-reais"></td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button type="button" id="add-nf" class="btn btn-sm btn-secondary mb-2">Adicionar NF</button>
+  <div class="d-flex align-items-end gap-3 flex-wrap">
+    <div>
+      <label style="color:green;"><strong>Total R$ Com Sala:</strong></label>
+      <input id="nf-total-com" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+    </div>
+    <div>
+      <label style="color:blue;"><strong>Total R$ Sem Sala:</strong></label>
+      <input id="nf-total-sem" type="text" readonly class="form-control form-control-sm valor-reais w-auto" style="max-width:120px;">
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary mt-3">Salvar</button>
+  <a href="{% url 'lista_despesas' %}" class="btn btn-link mt-3">&larr; Voltar</a>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    const nfBody     = document.getElementById('nf-body');
+    const addButton  = document.getElementById('add-nf');
+    const nfTotalCom = document.getElementById('nf-total-com');
+    const nfTotalSem = document.getElementById('nf-total-sem');
+
+    // --- funções NF existentes ---
+    function updateTipoColor(sel){
+      if(!sel) return;
+      sel.style.color = sel.value === 'sem' ? 'blue' : 'green';
+    }
+    function nfTotalCalc(){
+      let somaCom = 0, somaSem = 0;
+      nfBody.querySelectorAll('tr').forEach(row => {
+        const valInp = row.querySelector('input[name^="nf_valor_"]');
+        const tipo   = row.querySelector('select[name^="nf_tipo_"]')?.value || 'com';
+        const v = valInp ? parseFloat(valInp.value.replace(',', '.'))||0 : 0;
+        if(tipo === 'sem') somaSem += v; else somaCom += v;
+      });
+      nfTotalCom.value = somaCom.toFixed(2).replace('.', ',');
+      nfTotalSem.value = somaSem.toFixed(2).replace('.', ',');
+    }
+
+    // --- adiciona NF dinâmica ---
+    addButton.addEventListener('click', ()=>{
+      const idx = nfBody.children.length;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" name="nf_fornecedor_${idx}" class="form-control"></td>
+        <td><input type="text" name="nf_historico_${idx}"   class="form-control"></td>
+        <td><input type="text" name="nf_numero_${idx}"      class="form-control"></td>
+        <td>
+          <select name="nf_tipo_${idx}" class="form-select">
+            <option value="com" style="color:green;">Com a Sala</option>
+            <option value="sem" style="color:blue;">Sem a Sala</option>
+          </select>
+        </td>
+        <td><input type="text" name="nf_valor_${idx}" class="form-control valor-reais"></td>
+        <td><button type="button" class="btn btn-sm btn-danger remove-row">&times;</button></td>
+      `;
+      nfBody.appendChild(tr);
+      // atualiza cores e totais
+      updateTipoColor(tr.querySelector('select'));
+      nfTotalCalc();
+      // e **reconfigura** o tab-enter
+      setupEnterNavigation();
+    });
+
+    // --- remove linha ---
+    nfBody.addEventListener('click', e=>{
+      if(e.target.classList.contains('remove-row')){
+        e.target.closest('tr').remove();
+        nfTotalCalc();
+      }
+    });
+
+    // --- recalcula totais ao editar valor ou tipo ---
+    nfBody.addEventListener('input', e=>{
+      if(e.target.name?.startsWith('nf_valor_')) nfTotalCalc();
+    });
+    nfBody.addEventListener('change', e=>{
+      if(e.target.name?.startsWith('nf_tipo_')){
+        updateTipoColor(e.target);
+        nfTotalCalc();
+      }
+    });
+
+    // inicializa NF existentes
+    nfBody.querySelectorAll('select[name^="nf_tipo_"]').forEach(updateTipoColor);
+    nfTotalCalc();
+
+    // --- ENTER como TAB ---
+    function setupEnterNavigation(){
+      const form   = document.querySelector('form.card');
+      const fields = Array.from(
+        form.querySelectorAll('input:not([type=hidden]), select')
+      );
+      fields.forEach((el, idx) => {
+        el.onkeydown = e => {
+          if(e.key === 'Enter'){
+            e.preventDefault();
+            const next = fields[idx + 1];
+            if(next) next.focus();
+          }
+        };
+      });
+    }
+    // configura pela primeira vez
+    setupEnterNavigation();
+
+  });
+</script>
+{% endblock %}
