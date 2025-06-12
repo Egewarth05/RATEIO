@@ -645,6 +645,7 @@
           nfTotalCom   = document.getElementById('nf-total-com'),
           nfTotalSem   = document.getElementById('nf-total-sem');
     const materialTipo = 'material/serviço de consumo';
+    const reparoTipo   = 'reparos/reforma';
 
     function atualizaRate() {
           const f = parseFloat(af.value.replace(',', '.')) || 0;
@@ -719,8 +720,6 @@
       // lista de tipos que usam apenas o bloco "simples"
     const simplesText = [
       'serviço - faxina',
-      'reparo/reforma (sem a sala)',
-      'reparos/reforma',
       'salário - síndico',
       'elevador',
       'material consumo (sem sala comercial)',
@@ -823,7 +822,7 @@
             rs.style.display        = 'block'
             rp.style.display        = 'none'
         }
-        else if (txt === materialTipo) {
+        else if (txt === materialTipo || txt === reparoTipo) {
             nfBlock.style.display = 'block';
         }
         else if (simplesText.some(item => txt.includes(item.toLowerCase()))) {
