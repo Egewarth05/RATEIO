@@ -333,7 +333,7 @@ def nova_despesa(request):
 
         # === MATERIAL/SERVIÇO DE CONSUMO ===
         nf_entries = []
-        if tipo.nome.lower() == "material/serviço de consumo":
+        if tipo.nome.lower() in ["material/serviço de consumo", "reparos/reforma"]:
             idx = 0
             while True:
                 key = f'nf_valor_{idx}'
@@ -363,8 +363,13 @@ def nova_despesa(request):
             despesa.valor_total = total_com
             despesa.save()
 
+            if tipo.nome.lower() == 'material/serviço de consumo':
+                tipo_sem_nome = 'Material Consumo (Sem Sala Comercial)'
+            else:
+                tipo_sem_nome = 'Reparo/Reforma (Sem a Sala)'
+
             tipo_sem = TipoDespesa.objects.filter(
-                nome__iexact='Material Consumo (Sem Sala Comercial)'
+                nome__iexact=tipo_sem_nome
             ).first()
             despesa_sem = None
             if tipo_sem:
@@ -726,8 +731,12 @@ def excluir_despesa(request, despesa_id):
 def editar_despesa(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
 
-    if despesa.tipo.nome.lower() != 'material/serviço de consumo':
-        messages.error(request, 'Despesa não é do tipo Material/Serviço de Consumo.')
+    tipo_nome = despesa.tipo.nome.lower()
+    if tipo_nome not in ['material/serviço de consumo', 'reparos/reforma']:
+        messages.error(
+            request,
+            'Despesa não é do tipo Material/Serviço de Consumo ou Reparos/Reforma.'
+        )
         return redirect('lista_despesas')
 
     unidades = Unidade.objects.order_by('nome')
@@ -773,8 +782,13 @@ def editar_despesa(request, despesa_id):
         despesa.valor_total = total_com
         despesa.save()
 
+        if tipo_nome == 'reparos/reforma':
+            sem_nome = 'Reparo/Reforma (Sem a Sala)'
+        else:
+            sem_nome = 'Material Consumo (Sem Sala Comercial)'
+
         tipo_sem = TipoDespesa.objects.filter(
-            nome__iexact='Material Consumo (Sem Sala Comercial)'
+            nome__iexact=sem_nome
         ).first()
         despesa_sem = None
         if tipo_sem:
@@ -817,8 +831,13 @@ def editar_despesa(request, despesa_id):
         messages.success(request, 'Despesa atualizada com sucesso!')
         return redirect('lista_despesas')
 
+    if tipo_nome == 'reparos/reforma':
+        sem_nome = 'Reparo/Reforma (Sem a Sala)'
+    else:
+        sem_nome = 'Material Consumo (Sem Sala Comercial)'
+
     tipo_sem = TipoDespesa.objects.filter(
-        nome__iexact='Material Consumo (Sem Sala Comercial)'
+        nome__iexact=sem_nome
     ).first()
     nf_info_sem = []
     if tipo_sem:
@@ -848,15 +867,29 @@ def ver_rateio(request, despesa_id):
     rateio_com_sala = {}
     rateio_sem_sala = {}
 
-    if despesa.tipo.nome.lower() in [
-        'material/serviço de consumo',
-        'material consumo (sem sala comercial)'
-    ]:
+    pairings = [
+        (
+            'Material/Serviço de Consumo',
+            'Material Consumo (Sem Sala Comercial)'
+        ),
+        (
+            'Reparos/Reforma',
+            'Reparo/Reforma (Sem a Sala)'
+        ),
+    ]
+
+    pair_com = pair_sem = None
+    for com_name, sem_name in pairings:
+        if despesa.tipo.nome.lower() in [com_name.lower(), sem_name.lower()]:
+            pair_com, pair_sem = com_name, sem_name
+            break
+
+    if pair_com:
         tipo_com = TipoDespesa.objects.filter(
-            nome__iexact='Material/Serviço de Consumo'
+            nome__iexact=pair_com
         ).first()
         tipo_sem = TipoDespesa.objects.filter(
-            nome__iexact='Material Consumo (Sem Sala Comercial)'
+            nome__iexact=pair_sem
         ).first()
 
         despesa_com = despesa if despesa.tipo == tipo_com else None
@@ -1162,7 +1195,7 @@ def ver_rateio(request, despesa_id):
         'rateios': rateios,
         'valor_exibido': valor_exibido,
     }
-    if despesa.tipo.nome.lower() in ['material/serviço de consumo', 'material consumo (sem sala comercial)']:
+    if pair_com:
         context.update({
             'valor_com_sala': float(valor_com_sala),
             'valor_sem_sala': float(valor_sem_sala),
