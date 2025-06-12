@@ -9,14 +9,14 @@
 </h2>
 
 {% if despesa.tipo.nome|lower == "energia áreas comuns" %}
-  {# Para “Energia Áreas Comuns”, mostre o valor calculado na view: valor_exibido #}
   <p><strong>Total:</strong> R$ {{ valor_exibido|floatformat:2 }}</p>
 
 {% elif despesa.tipo.nome|lower == "energia salão" %}
   <p><strong>Total:</strong> R$ {{ energia_total|floatformat:2 }}</p>
 
 {% else %}
-  <p><strong>Total:</strong> R$
+  <p><strong>Total:</strong>
+    R$
     {% if input_total is not None %}
       {{ input_total|floatformat:2 }}
     {% elif total_rateio is not None %}
