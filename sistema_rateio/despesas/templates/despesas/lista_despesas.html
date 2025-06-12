@@ -160,7 +160,7 @@
             </td>
             <td>
               <a href="{% url 'ver_rateio' despesa.id %}" class="btn btn-sm btn-outline-primary">Ver</a>
-              {% if despesa.tipo.nome == 'Material/Serviço de Consumo' %}
+              {% if despesa.tipo.nome == 'Material/Serviço de Consumo' or despesa.tipo.nome == 'Reparos/Reforma' %}
                 <a href="{% url 'editar_despesa' despesa.id %}" class="btn btn-sm btn-outline-secondary">
                   <i class="bi bi-pencil"></i>
                 </a>
