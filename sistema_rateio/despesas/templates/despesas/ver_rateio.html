@@ -9,7 +9,7 @@
 </h2>
 
 {# 1) MATERIAL/SERVIÇO DE CONSUMO #}
-{% if despesa.tipo.nome|lower == 'material/serviço de consumo' %}
+{% if despesa.tipo.nome|lower in ['material/serviço de consumo', 'reparos/reforma'] %}
     <p>
       <strong>Total Com Sala:</strong> R$ {{ valor_com_sala|floatformat:2 }}
       &nbsp;&nbsp;
@@ -289,7 +289,7 @@
 
 {% block scripts %}
 <script>
-  const isMaterial = '{{ despesa.tipo.nome|lower }}' === 'material/serviço de consumo';
+  const isMaterial = ['material/serviço de consumo', 'reparos/reforma'].includes('{{ despesa.tipo.nome|lower }}');
   function editarRateio(id) {
     if (isMaterial) {
       ['com','sem'].forEach(pref => {
