@@ -692,8 +692,8 @@ def excluir_despesa(request, despesa_id):
 def editar_despesa(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
 
-    if despesa.tipo.nome.lower() != 'material/servi\u00e7o de consumo':
-        messages.error(request, 'Despesa n\u00e3o \u00e9 do tipo Material/Servi\u00e7o de Consumo.')
+    if despesa.tipo.nome.lower() != 'material/serviço de consumo':
+        messages.error(request, 'Despesa não é do tipo Material/Serviço de Consumo.')
         return redirect('lista_despesas')
 
     unidades = Unidade.objects.order_by('nome')
@@ -763,7 +763,7 @@ def ver_rateio(request, despesa_id):
     valor_sem_sala = Decimal('0')
     rateio_com_sala = {}
     rateio_sem_sala = {}
-    if despesa.tipo.nome.lower() == 'material/servi\u00e7o de consumo':
+    if despesa.tipo.nome.lower() == 'material/serviço de consumo':
         nf_info = despesa.nf_info or []
         for item in nf_info:
             try:
@@ -1053,7 +1053,7 @@ def ver_rateio(request, despesa_id):
         'rateios': rateios,
         'valor_exibido': valor_exibido,
     }
-    if despesa.tipo.nome.lower() == 'material/servi\u00e7o de consumo':
+    if despesa.tipo.nome.lower() == 'material/serviço de consumo':
         context.update({
             'valor_com_sala': float(valor_com_sala),
             'valor_sem_sala': float(valor_sem_sala),
