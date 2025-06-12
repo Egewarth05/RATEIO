@@ -25,9 +25,18 @@
       {{ despesa.valor_total|floatformat:2 }}
     {% endif %}
   </p>
-{% endif %}
+    {% if despesa.tipo.nome|lower == 'material/serviço de consumo' %}
+    <p>
+      <strong>Total Com Sala:</strong>
+      R$ {{ valor_com_sala|floatformat:2 }}
+      &nbsp;&nbsp;
+      <strong>Total Sem Sala:</strong>
+      R$ {{ valor_sem_sala|floatformat:2 }}
+    </p>
+  {% endif %}
+  {% endif %}
 
-{# --- GÁS --- #}
+    {# --- GÁS --- #}
 {% if despesa.tipo.nome|lower == "gás" %}
   {% if gas_params %}
     <h3>Parâmetros de Gás</h3>
@@ -242,9 +251,19 @@
         </td>
       </tr>
       {% endfor %}
-    </tbody>
-  </table>
-{% endif %}
+        </tbody>
+        {% if despesa.tipo.nome|lower == 'material/serviço de consumo' %}
+        <tfoot>
+            <tr>
+              <th>Total</th>
+              <th>R$ {{ valor_com_sala|floatformat:2 }}</th>
+              <th>R$ {{ valor_sem_sala|floatformat:2 }}</th>
+              <th></th>
+            </tr>
+          </tfoot>
+          {% endif %}
+        </table>
+    {% endif %}
 
 <a href="{% url 'lista_despesas' %}" class="btn btn-secondary mt-3">← Voltar</a>
 {% endblock %}
