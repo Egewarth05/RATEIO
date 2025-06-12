@@ -354,23 +354,57 @@ def nova_despesa(request):
                     })
                 idx += 1
 
-            total_nf = sum(e['valor'] for e in nf_entries)
-            despesa.nf_info = nf_entries
-            despesa.valor_total = total_nf
+            nf_com = [e for e in nf_entries if (e.get('tipo') or 'com') != 'sem']
+            nf_sem = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
+            total_com = sum(e['valor'] for e in nf_com)
+            total_sem = sum(e['valor'] for e in nf_sem)
+
+            despesa.nf_info = nf_com
+            despesa.valor_total = total_com
             despesa.save()
+
+            tipo_sem = TipoDespesa.objects.filter(
+                nome__iexact='Material Consumo (Sem Sala Comercial)'
+            ).first()
+            despesa_sem = None
+            if tipo_sem:
+                despesa_sem, _ = Despesa.objects.update_or_create(
+                    tipo=tipo_sem,
+                    mes=despesa.mes,
+                    ano=despesa.ano,
+                    defaults={
+                        'descricao': despesa.descricao,
+                        'valor_total': total_sem,
+                    }
+                )
+                despesa_sem.nf_info = nf_sem
+                despesa_sem.valor_total = total_sem
+                despesa_sem.save()
+
+            valores_com = {}
+            valores_sem = {}
+
             if fracoes_map:
                 for u in unidades:
                     pct = fracoes_map.get(u.id, 0)
-                    v   = total_nf * pct
-                    valores_por_unidade[u] = v
-                    total += v
+                    valores_com[u] = total_com * pct
+                    valores_sem[u] = total_sem * pct
             else:
-                share = total_nf / len(unidades) if unidades else 0
+                share_com = total_com / len(unidades) if unidades else 0
+                share_sem = total_sem / len(unidades) if unidades else 0
+
                 for u in unidades:
-                    valores_por_unidade[u] = share
-                total = total_nf
-            for u, v in valores_por_unidade.items():
-                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+                    valores_com[u] = share_com
+                    valores_sem[u] = share_sem
+
+            Rateio.objects.filter(despesa=despesa).delete()
+            if despesa_sem:
+                Rateio.objects.filter(despesa=despesa_sem).delete()
+
+            for u in unidades:
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
+                if despesa_sem:
+                    Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
             messages.success(request, 'Despesa cadastrada com sucesso!')
             return redirect('lista_despesas')
 
@@ -730,60 +764,134 @@ def editar_despesa(request, despesa_id):
                 })
             idx += 1
 
-        total_nf = sum(e['valor'] for e in nf_entries)
-        despesa.nf_info = nf_entries
-        despesa.valor_total = total_nf
+        nf_com = [e for e in nf_entries if (e.get('tipo') or 'com') != 'sem']
+        nf_sem = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
+        total_com = sum(e['valor'] for e in nf_com)
+        total_sem = sum(e['valor'] for e in nf_sem)
+
+        despesa.nf_info = nf_com
+        despesa.valor_total = total_com
         despesa.save()
 
-        Rateio.objects.filter(despesa=despesa).delete()
+        tipo_sem = TipoDespesa.objects.filter(
+            nome__iexact='Material Consumo (Sem Sala Comercial)'
+        ).first()
+        despesa_sem = None
+        if tipo_sem:
+            despesa_sem, _ = Despesa.objects.update_or_create(
+                tipo=tipo_sem,
+                mes=despesa.mes,
+                ano=despesa.ano,
+                defaults={
+                    'descricao': despesa.descricao,
+                    'valor_total': total_sem,
+                }
+            )
+            despesa_sem.nf_info = nf_sem
+            despesa_sem.valor_total = total_sem
+            despesa_sem.save()
+
+        valores_com = {}
+        valores_sem = {}
         if fracoes_map:
             for u in unidades:
                 pct = fracoes_map.get(u.id, 0)
-                Rateio.objects.create(despesa=despesa, unidade=u, valor=total_nf * pct)
+                valores_com[u] = total_com * pct
+                valores_sem[u] = total_sem * pct
         else:
-            share = total_nf / len(unidades) if unidades else 0
+            share_com = total_com / len(unidades) if unidades else 0
+            share_sem = total_sem / len(unidades) if unidades else 0
             for u in unidades:
-                Rateio.objects.create(despesa=despesa, unidade=u, valor=share)
+                valores_com[u] = share_com
+                valores_sem[u] = share_sem
+
+        Rateio.objects.filter(despesa=despesa).delete()
+        if despesa_sem:
+            Rateio.objects.filter(despesa=despesa_sem).delete()
+
+        for u in unidades:
+            Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
+            if despesa_sem:
+                Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
 
         messages.success(request, 'Despesa atualizada com sucesso!')
         return redirect('lista_despesas')
 
+    tipo_sem = TipoDespesa.objects.filter(
+        nome__iexact='Material Consumo (Sem Sala Comercial)'
+    ).first()
+    nf_info_sem = []
+    if tipo_sem:
+        despesa_sem = Despesa.objects.filter(
+            tipo=tipo_sem,
+            mes=despesa.mes,
+            ano=despesa.ano
+        ).first()
+        if despesa_sem and despesa_sem.nf_info:
+            nf_info_sem = despesa_sem.nf_info
+
+    nf_info_total = (despesa.nf_info or []) + nf_info_sem
+
     return render(request, 'despesas/editar_despesa.html', {
         'despesa': despesa,
-        'nf_info': despesa.nf_info or [],
+        'nf_info': nf_info_total,
     })
 
 def ver_rateio(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
+    valor_exibido = despesa.valor_total
     rateios = Rateio.objects.filter(despesa=despesa)
     total_rateio = rateios.aggregate(total=Sum('valor'))['total'] or 0
-    valor_exibido = despesa.valor_total
 
     valor_com_sala = Decimal('0')
     valor_sem_sala = Decimal('0')
     rateio_com_sala = {}
     rateio_sem_sala = {}
-    if despesa.tipo.nome.lower() == 'material/serviço de consumo':
-        nf_info = despesa.nf_info or []
-        for item in nf_info:
-            try:
-                valor = Decimal(str(item.get('valor', 0)))
-            except Exception:
-                valor = Decimal('0')
-            if item.get('tipo') == 'sem':
-                valor_sem_sala += valor
-            else:
-                valor_com_sala += valor
 
-        total_val = Decimal(str(despesa.valor_total)) if despesa.valor_total else Decimal('0')
+    if despesa.tipo.nome.lower() in [
+        'material/serviço de consumo',
+        'material consumo (sem sala comercial)'
+    ]:
+        tipo_com = TipoDespesa.objects.filter(
+            nome__iexact='Material/Serviço de Consumo'
+        ).first()
+        tipo_sem = TipoDespesa.objects.filter(
+            nome__iexact='Material Consumo (Sem Sala Comercial)'
+        ).first()
+
+        despesa_com = despesa if despesa.tipo == tipo_com else None
+        despesa_sem = despesa if despesa.tipo == tipo_sem else None
+        if not despesa_com and tipo_com:
+            despesa_com = Despesa.objects.filter(
+                tipo=tipo_com, mes=despesa.mes, ano=despesa.ano
+            ).first()
+        if not despesa_sem and tipo_sem:
+            despesa_sem = Despesa.objects.filter(
+                tipo=tipo_sem, mes=despesa.mes, ano=despesa.ano
+            ).first()
+
+        rateios_com = Rateio.objects.filter(despesa=despesa_com) if despesa_com else []
+        rateios_sem = Rateio.objects.filter(despesa=despesa_sem) if despesa_sem else []
+
+        rateios = list(rateios_com) if rateios_com else list(rateios_sem)
+        valor_com_sala = despesa_com.valor_total if despesa_com else Decimal('0')
+        valor_sem_sala = despesa_sem.valor_total if despesa_sem else Decimal('0')
+
+        valor_exibido = valor_com_sala + valor_sem_sala
+
+        rateio_com_sala = {r.id: r.valor for r in rateios_com}
+        sem_map = {r.unidade_id: r.valor for r in rateios_sem}
+
         for r in rateios:
-            pct = (Decimal(str(r.valor)) / total_val) if total_val else Decimal('0')
-            rateio_com_sala[r.id] = (valor_com_sala * pct).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
-            rateio_sem_sala[r.id] = (valor_sem_sala * pct).quantize(
-                Decimal('0.01'), rounding=ROUND_HALF_UP
-            )
+            rateio_sem_sala[r.id] = sem_map.get(r.unidade_id, Decimal('0'))
+        return render(request, 'despesas/ver_rateio.html', {
+            'despesa':           despesa,
+            'rateios':           rateios,
+            'valor_com_sala':    float(valor_com_sala),
+            'valor_sem_sala':    float(valor_sem_sala),
+            'rateio_com_sala':   { k: float(v) for k,v in rateio_com_sala.items() },
+            'rateio_sem_sala':   { k: float(v) for k,v in rateio_sem_sala.items() },
+        })
 
     if despesa.tipo.nome.lower() == 'energia áreas comuns':
         # 1) pega fatura e custo_kwh da última “Energia Salão” desse mês/ano
@@ -1045,6 +1153,7 @@ def ver_rateio(request, despesa_id):
             'despesa':         despesa,
             'fracoes_valores': fracoes_valores,
             'valor_exibido':  valor_exibido,
+            'total_rateio' : total_rateio,
         })
 
     # --- PADRÃO ---
@@ -1053,7 +1162,7 @@ def ver_rateio(request, despesa_id):
         'rateios': rateios,
         'valor_exibido': valor_exibido,
     }
-    if despesa.tipo.nome.lower() == 'material/serviço de consumo':
+    if despesa.tipo.nome.lower() in ['material/serviço de consumo', 'material consumo (sem sala comercial)']:
         context.update({
             'valor_com_sala': float(valor_com_sala),
             'valor_sem_sala': float(valor_sem_sala),
