@@ -97,50 +97,6 @@ def recalc_fundo_reserva(sender, instance, **kwargs):
             valor = (restante * pct).quantize(Decimal('0.01'))
         Rateio.objects.create(despesa=fr, unidade=unidade, valor=valor)
 
-@receiver(post_delete, sender=Despesa)
-def apagar_leituras_agua(sender, instance, **kwargs):
-    if instance.tipo.nome.lower() == 'água':
-        LeituraAgua.objects.filter(mes=instance.mes, ano=instance.ano).delete()
-
-    valor_base = instance.valor_total
-    # busca todas as frações para este tipo-de-fundo
-    frac_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=instance.tipo)
-
-    # monta dicionário unidade → percentual normalizado (0–1)
-    frac_map = {}
-    for f in frac_qs:
-        pct = Decimal(f.percentual)
-        if pct > 1:
-            pct = pct / Decimal('100')
-        frac_map[f.unidade] = pct
-
-    # identifica se há “sala” e calcula meia-cota
-    sala = None
-    for un, pct in frac_map.items():
-        if un.nome.lower().startswith('sala'):
-            sala = un
-            break
-
-    if sala:
-        pct_sala = frac_map[sala]
-        share_sala = (valor_base * pct_sala / 2).quantize(Decimal('0.01'))
-        restante   = (valor_base - share_sala).quantize(Decimal('0.01'))
-    else:
-        share_sala = Decimal('0')
-        restante   = valor_base
-
-    # cria um Rateio para cada unidade
-    for un, pct in frac_map.items():
-        if sala and un == sala:
-            valor = share_sala
-        else:
-            valor = (restante * pct).quantize(Decimal('0.01'))
-        Rateio.objects.create(
-            despesa=instance,
-            unidade=un,
-            valor=valor
-        )
-
 @receiver(post_save, sender=FundoReserva)
 def sync_fundo_reserva(sender, instance, **kwargs):
     # 1) pega (ou cria) o Despesa do tipo “Fundo de Reserva”
@@ -292,3 +248,79 @@ def criar_energia_areas_comuns(sender, instance, created, **kwargs):
                 unidade=unidade_obj,
                 valor=valor_unitario
             )
+
+@receiver(post_save, sender=Despesa)
+def separar_material_consumo(sender, instance, created, **kwargs):
+    """Divide Material/Serviço de Consumo em 'com' e 'sem' Sala Comercial."""
+    if instance.tipo.nome.lower() != 'material/serviço de consumo':
+        return
+
+    nf_entries = instance.nf_info or []
+    nf_com: list = []
+    nf_sem: list = []
+    total_com = Decimal('0')
+    total_sem = Decimal('0')
+
+    for entry in nf_entries:
+        raw_valor = entry.get('valor', 0)
+        try:
+            valor = Decimal(str(raw_valor))
+        except Exception:
+            valor = Decimal('0')
+
+        if (entry.get('tipo') or '').lower() == 'sem':
+            nf_sem.append(entry)
+            total_sem += valor
+        else:
+            nf_com.append(entry)
+            total_com += valor
+
+    total_com = total_com.quantize(Decimal('0.01'), ROUND_HALF_UP)
+    total_sem = total_sem.quantize(Decimal('0.01'), ROUND_HALF_UP)
+
+    # Atualiza a despesa original mantendo apenas NF 'com' e seu total
+    Despesa.objects.filter(pk=instance.pk).update(
+        nf_info=nf_com,
+        valor_total=total_com,
+    )
+    instance.nf_info = nf_com
+    instance.valor_total = total_com
+
+    def rebuild_rateio(despesa_obj, total_val):
+        Rateio.objects.filter(despesa=despesa_obj).delete()
+        unidades = list(Unidade.objects.order_by('nome'))
+        fracoes = {
+            f.unidade: Decimal(f.percentual)
+            for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa_obj.tipo)
+        }
+        if fracoes:
+            for un in unidades:
+                pct = fracoes.get(un, Decimal('0'))
+                if pct > 1:
+                    pct = pct / Decimal('100')
+                valor = (total_val * pct).quantize(Decimal('0.01'), ROUND_HALF_UP)
+                Rateio.objects.create(despesa=despesa_obj, unidade=un, valor=valor)
+        else:
+            share = (total_val / len(unidades)).quantize(Decimal('0.01'), ROUND_HALF_UP) if unidades else Decimal('0')
+            for un in unidades:
+                Rateio.objects.create(despesa=despesa_obj, unidade=un, valor=share)
+
+    rebuild_rateio(instance, total_com)
+
+    tipo_sem, _ = TipoDespesa.objects.get_or_create(
+        nome__icontains='Sem Sala Comercial',
+        defaults={'nome': 'Material Consumo (Sem Sala Comercial)'}
+    )
+
+    desp_sem, _ = Despesa.objects.update_or_create(
+        tipo=tipo_sem,
+        mes=instance.mes,
+        ano=instance.ano,
+        defaults={
+            'descricao': instance.descricao,
+            'valor_total': total_sem,
+            'nf_info': nf_sem,
+        }
+    )
+
+    rebuild_rateio(desp_sem, total_sem)
