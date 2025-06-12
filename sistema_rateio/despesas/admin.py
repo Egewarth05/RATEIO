@@ -50,6 +50,8 @@ from .models import (
     DespesaAreasComuns,
     DespesaComSala,
     DespesaSemSala,
+    DespesaReparoComSala,
+    DespesaReparoSemSala,
     )
 
 BASE_TIPOS = [
@@ -97,6 +99,45 @@ class DespesaSemSalaAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.filter(tipo__nome__iexact="material/serviço de consumo")
+
+    def valor_sem_sala(self, obj):
+        total = Decimal("0")
+        for nf in obj.nf_info or []:
+            if (nf.get("tipo") or "").lower() == "sem":
+                total += Decimal(str(nf.get("valor", 0)))
+        return f"{total:.2f}"
+    valor_sem_sala.short_description = "Sem Sala (R$)"
+
+@admin.register(DespesaReparoComSala)
+class DespesaReparoComSalaAdmin(admin.ModelAdmin):
+    list_display = ("id", "mes", "ano", "valor_com_sala")
+    list_filter  = ("mes", "ano")
+    ordering     = ("-ano", "-mes")
+    readonly_fields = ("mes", "ano", "valor_com_sala")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(tipo__nome__iexact="reparos/reforma")
+
+    def valor_com_sala(self, obj):
+        total = Decimal("0")
+        for nf in obj.nf_info or []:
+            if (nf.get("tipo") or "").lower() != "sem":
+                total += Decimal(str(nf.get("valor", 0)))
+        return f"{total:.2f}"
+    valor_com_sala.short_description = "Com Sala (R$)"
+
+
+@admin.register(DespesaReparoSemSala)
+class DespesaReparoSemSalaAdmin(admin.ModelAdmin):
+    list_display = ("id", "mes", "ano", "valor_sem_sala")
+    list_filter  = ("mes", "ano")
+    ordering     = ("-ano", "-mes")
+    readonly_fields = ("mes", "ano", "valor_sem_sala")
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(tipo__nome__iexact="reparos/reforma")
 
     def valor_sem_sala(self, obj):
         total = Decimal("0")
@@ -203,7 +244,7 @@ class DespesaAdmin(admin.ModelAdmin):
     get_valor_total.admin_order_field = 'valor_total'
 
     def total_com_sala(self, obj):
-        if obj.tipo.nome.lower() != 'material/serviço de consumo':
+        if obj.tipo.nome.lower() not in ['material/serviço de consumo', 'reparos/reforma']:
             return '—'
         total = Decimal('0')
         for item in obj.nf_info or []:
@@ -216,7 +257,7 @@ class DespesaAdmin(admin.ModelAdmin):
     total_com_sala.short_description = 'Total com Sala'
 
     def total_sem_sala(self, obj):
-        if obj.tipo.nome.lower() != 'material/serviço de consumo':
+        if obj.tipo.nome.lower() not in ['material/serviço de consumo', 'reparos/reforma']:
             return '—'
         total = Decimal('0')
         for item in obj.nf_info or []:
