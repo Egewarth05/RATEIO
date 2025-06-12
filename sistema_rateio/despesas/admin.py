@@ -78,7 +78,10 @@ class UnidadeAdmin(admin.ModelAdmin):
 
 @admin.register(Despesa)
 class DespesaAdmin(admin.ModelAdmin):
-    list_display  = ('id', 'tipo', 'mes', 'ano', 'get_valor_total', 'descricao', 'total_leituras',)
+    list_display  = (
+        'id', 'tipo', 'mes', 'ano', 'get_valor_total', 'descricao',
+        'total_com_sala', 'total_sem_sala', 'total_leituras',
+    )
     list_filter   = ('tipo', 'mes', 'ano')
     search_fields = ('descricao',)
     readonly_fields = ('mes', 'ano', 'get_valor_total', 'total_leituras')
@@ -157,6 +160,33 @@ class DespesaAdmin(admin.ModelAdmin):
 
     get_valor_total.short_description = 'Valor Total'
     get_valor_total.admin_order_field = 'valor_total'
+
+    def total_com_sala(self, obj):
+        if obj.tipo.nome.lower() != 'material/serviço de consumo':
+            return '—'
+        total = Decimal('0')
+        for item in obj.nf_info or []:
+            if (item.get('tipo') or '').lower() != 'sem':
+                try:
+                    total += Decimal(str(item.get('valor', 0)))
+                except Exception:
+                    pass
+        return f"{total:.2f}" if total else '—'
+    total_com_sala.short_description = 'Total com Sala'
+
+    def total_sem_sala(self, obj):
+        if obj.tipo.nome.lower() != 'material/serviço de consumo':
+            return '—'
+        total = Decimal('0')
+        for item in obj.nf_info or []:
+            if (item.get('tipo') or '').lower() == 'sem':
+                try:
+                    total += Decimal(str(item.get('valor', 0)))
+                except Exception:
+                    pass
+        return f"{total:.2f}" if total else '—'
+    total_sem_sala.short_description = 'Total sem Sala'
+
     def total_leituras(self, obj):
         """
         Mostra a soma dos kWh lidos se o tipo for 'Energia Salão'.
