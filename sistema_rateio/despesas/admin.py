@@ -2244,6 +2244,33 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             {"Parâmetro": "Uso kWh",        "Valor": float(en_uso)},
         ])
 
+        tipos_nf = [
+            "Material/Serviço de Consumo",
+            "Material Consumo (Sem Sala Comercial)",
+            "Reparos/Reforma",
+            "Reparo/Reforma (Sem a Sala)",
+        ]
+
+        nf_rows = []
+        despesas_nf = Despesa.objects.filter(
+            mes=mes,
+            ano=ano,
+            tipo__nome__in=tipos_nf,
+        )
+
+        for desp in despesas_nf:
+            for nf in desp.nf_info or []:
+                nf_rows.append({
+                    "Tipo Despesa": desp.tipo.nome,
+                    "Fornecedor": nf.get("fornecedor", ""),
+                    "Histórico": nf.get("historico", ""),
+                    "NF Nº": nf.get("numero", ""),
+                    "Tipo (com/sem)": nf.get("tipo", ""),
+                    "Valor": nf.get("valor", 0),
+                })
+
+        df_nfs = pd.DataFrame(nf_rows)
+
         # 3) gravar tudo no Excel, incluindo a aba de parâmetros
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
@@ -2310,6 +2337,12 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 sheet_name="DESPESAS RATEIO",
                 index=False,
                 na_rep='-'
+            )
+
+            df_nfs.to_excel(
+                writer,
+                sheet_name="Notas Fiscais",
+                index=False
             )
 
             nrows   = len(df_leituras)
@@ -2536,6 +2569,14 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 paint(gas_idx,  fmt_gas)
                 paint(ener_idx, fmt_ener)
                 paint(cons_idx, fmt_cons)
+
+                if 'Notas Fiscais' in writer.sheets:
+                    ws_nf = writer.sheets['Notas Fiscais']
+                    ws_nf.set_row(0, None, header_fmt)
+                    ws_nf.set_column(0, len(df_nfs.columns)-1, 20, center_fmt)
+                    if 'Valor' in df_nfs.columns:
+                        col_val_nf = df_nfs.columns.get_loc('Valor')
+                        ws_nf.set_column(col_val_nf, col_val_nf, 15, currency_fmt)
 
         buffer.seek(0)
         filename = f'RATEIOS DESPESAS {mes:02d}_{ano}.xlsx'
