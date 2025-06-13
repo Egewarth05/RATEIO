@@ -2168,6 +2168,11 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
         df_exib_un = df_exib_un.set_index('Despesas Condomínio')
         df_exib_un.loc['Consumo Energia Salão'] = pd.Series(energia_map)
+        if 'Energia Salão' in df_exib_un.index:
+            energia_row = df_exib_un.loc['Energia Salão']
+            for unidade, val in energia_row.items():
+                if unidade in df_leituras['Unidade'].values:
+                    df_leituras.loc[df_leituras['Unidade'] == unidade, 'Energia – R$'] = float(val or 0)
         df_exib_un = df_exib_un.reset_index()
 
         # lista completa na ordem que você quer
