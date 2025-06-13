@@ -34,7 +34,10 @@ ANOS_DISPONIVEIS = [2025, 2026, 2027]
 
 def lista_despesas(request):
     current_sort = request.GET.get('sort', 'recentes')
-    qs = Despesa.objects.exclude(tipo__nome__iexact='Fundo de Reserva')
+    qs = (
+        Despesa.objects.filter(ativo=True)
+        .exclude(tipo__nome__iexact='Fundo de Reserva')
+    )
 
     # filtros de tipo / mês / ano
     tipo = request.GET.get('tipo')
@@ -1254,7 +1257,7 @@ def limpar_tudo(request):
     post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
     try:
         with transaction.atomic():
-            Despesa.objects.all().delete()
+            Despesa.objects.update(ativo=False)
     finally:
         # Garante que os sinais voltem a estar conectados
         post_delete.connect(recalc_fundo_reserva, sender=Despesa)
