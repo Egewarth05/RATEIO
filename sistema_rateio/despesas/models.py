@@ -110,7 +110,7 @@ class Despesa(models.Model):
     nf_info = JSONField("Notas Fiscais", blank=True, null=True)
 
     def save(self, *args, **kwargs):
-        """Reaproveita despesa inativa existente em vez de criar nova."""
+        """Reativa registro inativo caso já exista para o mesmo tipo/mês/ano."""
         if not self.pk:
             lookup = {
                 "tipo": self.tipo,
@@ -118,10 +118,12 @@ class Despesa(models.Model):
                 "ano": self.ano,
                 "ativo": False,
             }
-            if self.descricao:
-                lookup["descricao"] = self.descricao
+            descricao = (self.descricao or "").strip()
+            self.descricao = descricao
+            if descricao:
+                lookup["descricao"] = descricao
             else:
-                lookup["descricao__isnull"] = True
+                lookup["descricao__in"] = ["", None]
             existente = Despesa.objects.filter(**lookup).first()
             if existente:
                 self.pk = existente.pk
