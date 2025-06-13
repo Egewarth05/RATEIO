@@ -254,7 +254,7 @@
             <td>
               <span id="valor-display-{{ r.id }}">R$ {{ r.valor|floatformat:2 }}</span>
               <input
-                type="number"
+                type="number" min="0"
                 step="0.01"
                 id="valor-input-{{ r.id }}"
                 value="{{ r.valor|floatformat:2 }}"
@@ -351,5 +351,20 @@
     document.querySelector(`.salvar-btn[onclick="salvarRateio(${id})"]`).classList.add('d-none');
     document.querySelector(`.cancelar-btn[onclick="cancelarEdicao(${id})"]`).classList.add('d-none');
   }
+</script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('input.valor-reais, input[type="number"]').forEach(inp => {
+      if (inp.type === 'number') {
+        inp.setAttribute('min', '0');
+      }
+      inp.addEventListener('input', () => {
+        inp.value = inp.value.replace(/[^0-9.,]/g, '');
+        if (inp.value.startsWith('-')) {
+          inp.value = inp.value.slice(1);
+        }
+      });
+    });
+  });
 </script>
 {% endblock %}
