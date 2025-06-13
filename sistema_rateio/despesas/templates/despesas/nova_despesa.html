@@ -1307,12 +1307,19 @@ document.addEventListener('DOMContentLoaded', atualizarTotalLeituras);
     document.querySelectorAll('input.valor-reais, input[type="number"]').forEach(inp => {
       if (inp.type === 'number') {
         inp.setAttribute('min', '0');
+        inp.setAttribute('inputmode', 'decimal');
       }
       inp.addEventListener('input', () => {
-        inp.value = inp.value.replace(/[^0-9.,]/g, '');
-        if (inp.value.startsWith('-')) {
-          inp.value = inp.value.slice(1);
+        const pos = inp.selectionStart;
+        let val = inp.value.replace(/[^0-9.,]/g, '');
+        if (val.startsWith('-')) {
+          val = val.slice(1);
         }
+        if (inp.type === 'number') {
+          val = val.replace(',', '.');
+        }
+        inp.value = val;
+        if (pos !== null) inp.setSelectionRange(pos, pos);
       });
     });
   });
