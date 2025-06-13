@@ -82,7 +82,20 @@ def lista_despesas(request):
                 raw_fatura = params.get('fatura', 0)
                 raw_custo = params.get('custo_kwh', 0)
             else:
-                raw_fatura = 0
+                fatura_obj = (
+                    Despesa.objects
+                    .filter(
+                        mes=str(int(d.mes)),
+                        ano=d.ano,
+                        tipo__nome__iexact='Fatura Energia Elétrica'
+                    )
+                    .order_by('-id')
+                    .first()
+                )
+                if fatura_obj:
+                    raw_fatura = fatura_obj.valor_total
+                else:
+                    raw_fatura = d.valor_total
                 raw_custo = 0
 
             try:
