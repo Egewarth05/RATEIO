@@ -354,15 +354,19 @@
 </script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('input.valor-reais, input[type="number"]').forEach(inp => {
-      if (inp.type === 'number') {
+    document.querySelectorAll('input.valor-reais, input[type="number"], input[step="0.0001"]').forEach(inp => {
+      if (inp.type === 'number' || inp.matches('[step="0.0001"]')) {
         inp.setAttribute('min', '0');
+        inp.setAttribute('inputmode', 'decimal');
       }
       inp.addEventListener('input', () => {
-        inp.value = inp.value.replace(/[^0-9.,]/g, '');
-        if (inp.value.startsWith('-')) {
-          inp.value = inp.value.slice(1);
+        const pos = inp.selectionStart;
+        let val = inp.value.replace(/[^0-9.,]/g, '');
+        if (val.startsWith('-')) {
+          val = val.slice(1);
         }
+        inp.value = val;
+        if (pos !== null) inp.setSelectionRange(pos, pos);
       });
     });
   });
