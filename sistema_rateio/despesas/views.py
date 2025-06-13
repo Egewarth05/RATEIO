@@ -6,7 +6,7 @@ from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
     LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
 )
-from django.db import transaction
+from django.db import transactiona
 from django.db.models.signals import post_delete
 from .signals import recalc_fundo_reserva
 from datetime import datetime
