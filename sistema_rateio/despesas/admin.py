@@ -162,15 +162,15 @@ class UnidadeAdmin(admin.ModelAdmin):
 class DespesaAdmin(admin.ModelAdmin):
     list_display  = (
         'id', 'tipo', 'mes', 'ano', 'get_valor_total', 'descricao',
-        'total_com_sala', 'total_sem_sala', 'total_leituras',
+        'total_com_sala', 'total_sem_sala', 'total_leituras', 'ativo',
     )
-    list_filter   = ('tipo', 'mes', 'ano')
+    list_filter   = ('tipo', 'mes', 'ano', 'ativo')
     search_fields = ('descricao',)
     readonly_fields = ('mes', 'ano', 'get_valor_total', 'total_leituras')
 
     default_fieldsets = (
         (None, {
-            'fields': ('tipo', 'mes', 'ano', 'get_valor_total', 'descricao'),
+            'fields': ('tipo', 'mes', 'ano', 'get_valor_total', 'descricao', 'ativo'),
         }),
     )
 
