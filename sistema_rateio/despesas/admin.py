@@ -1988,13 +1988,8 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             for uni, val in df_rateio_pivot.set_index('Unidade')['Gás'].to_dict().items()
         }
 
-        en = DespesaEnergia.objects.filter(mes=mes, ano=ano).order_by('-id').first()
-        if en and en.energia_leituras:
-            p = en.energia_leituras['params']
-            en_fat = Decimal(p.get('fatura',   0))
-            en_uso = Decimal(p.get('uso_kwh',  0))
-        else:
-            en_kwh_tot = en_custo = Decimal('0')
+        # valores de energia já foram obtidos anteriormente (en_fat,
+        # en_kwh_tot, en_custo, en_uso). Evita nova consulta repetida
         rows = []
         energia_map = {}
 
@@ -2027,8 +2022,15 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
             la2_val = ant2.leitura if ant2 else None
             lk2_val = atu2.leitura if atu2 else None
 
-            diff1 = (lk1_val - la1_val) if (la1_val is not None and lk1_val is not None) else 0
-            diff2 = (lk2_val - la2_val) if (la2_val is not None and lk2_val is not None) else 0
+            if lk1_val is not None:
+                diff1 = lk1_val - (la1_val or 0)
+            else:
+                diff1 = 0
+
+            if lk2_val is not None:
+                diff2 = lk2_val - (la2_val or 0)
+            else:
+                diff2 = 0
             cons_en = max(diff1, 0) + max(diff2, 0)
             energia_map[un.nome] = round(cons_en, 3)
 
@@ -2071,14 +2073,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
                 gas_m3kg = Decimal(p.get('m3_kg',   0))
             else:
                 gas_rec = gas_kg = gas_m3kg = Decimal('0')
-
-            en = DespesaEnergia.objects.filter(mes=mes, ano=ano).order_by('-id').first()
-            if en and en.energia_leituras:
-                p = en.energia_leituras.get('params', {})
-                en_kwh_tot = Decimal(p.get('kwh_total', 0))
-                en_custo   = Decimal(p.get('custo_kwh', 0))
-            else:
-                en_kwh_tot = en_custo = Decimal('0')
 
             # 2) só depois disso você monta o dicionário:
             rows.append({
