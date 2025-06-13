@@ -149,7 +149,13 @@ def lista_despesas(request):
 
 
 def nova_despesa(request):
-    tipos = TipoDespesa.objects.exclude(nome__iexact='Fundo de Reserva')
+    tipos = (
+        TipoDespesa.objects
+            .exclude(nome__iexact='Fundo de Reserva')
+            .exclude(nome__iexact='Energia Áreas Comuns')
+            .exclude(nome__iexact='Material Consumo (Sem Sala Comercial)')
+            .exclude(nome__iexact='Reparo/Reforma (Sem a Sala)')
+    )
     leituras_anteriores = {}
     leituras_agua_anteriores = {}
     form = DespesaForm()
