@@ -141,7 +141,8 @@ def sync_fundo_reserva(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Despesa)
 def criar_energia_areas_comuns(sender, instance, created, **kwargs):
-    if instance.tipo.nome.lower() != 'energia salão':
+    nome_tipo = instance.tipo.nome.lower()
+    if nome_tipo not in ['energia salão', 'fatura energia elétrica']:
         return
 
     # 2) Converte mes/ano para int (caso dê erro, aborta)
@@ -159,14 +160,49 @@ def criar_energia_areas_comuns(sender, instance, created, **kwargs):
     )
 
     # 4) Extrai do JSONField de Energia Salão os parâmetros “fatura” e “custo_kwh”
-    params = instance.energia_leituras.get('params', {}) if instance.energia_leituras else {}
-    try:
-        fatura = Decimal(str(params.get('fatura', 0)))
-    except:
-        fatura = Decimal('0')
-    try:
-        custo_kwh = Decimal(str(params.get('custo_kwh', 0)))
-    except:
+    energia_salao = (
+        Despesa.objects
+        .filter(
+            mes=instance.mes,
+            ano=instance.ano,
+            tipo__nome__iexact='Energia Salão'
+        )
+        .order_by('-id')
+        .first()
+    )
+
+    if energia_salao and energia_salao.energia_leituras:
+        params = energia_salao.energia_leituras.get('params', {})
+        try:
+            fatura = Decimal(str(params.get('fatura', 0)))
+        except Exception:
+            fatura = Decimal('0')
+        try:
+            custo_kwh = Decimal(str(params.get('custo_kwh', 0)))
+        except Exception:
+            custo_kwh = Decimal('0')
+    else:
+        # se não existe "Energia Salão", tenta pegar a fatura registrada
+        fatura_obj = (
+            Despesa.objects
+            .filter(
+                mes=instance.mes,
+                ano=instance.ano,
+                tipo__nome__iexact='Fatura Energia Elétrica'
+            )
+            .order_by('-id')
+            .first()
+        )
+        if fatura_obj:
+            try:
+                fatura = Decimal(str(fatura_obj.valor_total))
+            except Exception:
+                fatura = Decimal('0')
+        else:
+            try:
+                fatura = Decimal(str(instance.valor_total))
+            except Exception:
+                fatura = Decimal('0')
         custo_kwh = Decimal('0')
 
     # 5) Soma todas as “leituras” do mês atual (cada leitura.leitura já é o consumo daquele medidor)
