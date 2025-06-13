@@ -109,6 +109,25 @@ class Despesa(models.Model):
     energia_leituras = JSONField("Leituras de Energia", blank=True, null=True)
     nf_info = JSONField("Notas Fiscais", blank=True, null=True)
 
+    def save(self, *args, **kwargs):
+        """Reaproveita despesa inativa existente em vez de criar nova."""
+        if not self.pk:
+            lookup = {
+                "tipo": self.tipo,
+                "mes": self.mes,
+                "ano": self.ano,
+                "ativo": False,
+            }
+            if self.descricao:
+                lookup["descricao"] = self.descricao
+            else:
+                lookup["descricao__isnull"] = True
+            existente = Despesa.objects.filter(**lookup).first()
+            if existente:
+                self.pk = existente.pk
+                self.ativo = True
+        super().save(*args, **kwargs)
+
     @property
     def total_leituras(self):
         if self.tipo.nome.lower() != 'energia salão':
