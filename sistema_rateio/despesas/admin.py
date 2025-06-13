@@ -2176,12 +2176,6 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         df_exib_un.loc['Consumo Energia Salão'] = pd.Series(energia_map)
         df_exib_un = df_exib_un.reset_index()
 
-        buffer = io.BytesIO()
-        # É aqui que abre o único 'with'
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_leituras.to_excel(writer,
-                                 sheet_name='DESPESAS RATEIO',
-                                 index=False)
         # lista completa na ordem que você quer
         colunas = [
             'Unidade',
