@@ -88,6 +88,8 @@ class Despesa(models.Model):
     ano          = models.IntegerField(choices=[(y, y) for y in range(2025, 2028)])
     descricao    = models.CharField("Descrição única", max_length=350, blank=True, null=True)
 
+    ativo = models.BooleanField(default=True, help_text="Visível na lista de despesas")
+
     fatura_agua    = models.DecimalField(
         "R$ Fatura", max_digits=12, decimal_places=2,
         null=True, blank=True
