@@ -9,10 +9,10 @@ class DespesaForm(forms.ModelForm):
         fields = ['tipo', 'mes', 'ano', 'descricao']
 
 class DespesaEnergiaForm(forms.ModelForm):
-    fatura      = forms.DecimalField(label="R$ Fatura",    max_digits=10, decimal_places=2, required=False)
-    kwh_total   = forms.DecimalField(label="kWh Total",    max_digits=12, decimal_places=4, required=False)
-    custo_kwh   = forms.DecimalField(label="R$ Custo kWh", max_digits=12, decimal_places=4, required=False)
-    uso_kwh     = forms.DecimalField(label="R$ Uso kWh",   max_digits=12, decimal_places=2, required=False)
+    fatura      = forms.DecimalField(label="R$ Fatura",    max_digits=10, decimal_places=2, required=False, min_value=0)
+    kwh_total   = forms.DecimalField(label="kWh Total",    max_digits=12, decimal_places=4, required=False, min_value=0)
+    custo_kwh   = forms.DecimalField(label="R$ Custo kWh", max_digits=12, decimal_places=4, required=False, min_value=0)
+    uso_kwh     = forms.DecimalField(label="R$ Uso kWh",   max_digits=12, decimal_places=2, required=False, min_value=0)
 
     class Meta:
         model = Despesa
@@ -44,10 +44,10 @@ class DespesaEnergiaForm(forms.ModelForm):
         return inst
 
 class DespesaGasForm(forms.ModelForm):
-    recarga   = forms.DecimalField(label="R$ Recarga", max_digits=10, decimal_places=2)
-    kg        = forms.DecimalField(label="KG", max_digits=10, decimal_places=4)
-    m3_kg     = forms.DecimalField(label="M³ por KG", max_digits=10, decimal_places=4)
-    valor_m3  = forms.DecimalField(label="R$ por M³", max_digits=10, decimal_places=2)
+    recarga   = forms.DecimalField(label="R$ Recarga", max_digits=10, decimal_places=2, min_value=0)
+    kg        = forms.DecimalField(label="KG", max_digits=10, decimal_places=4, min_value=0)
+    m3_kg     = forms.DecimalField(label="M³ por KG", max_digits=10, decimal_places=4, min_value=0)
+    valor_m3  = forms.DecimalField(label="R$ por M³", max_digits=10, decimal_places=2, min_value=0)
 
     class Meta:
         model = DespesaGas
@@ -79,9 +79,9 @@ class DespesaGasForm(forms.ModelForm):
         return inst
 
 class DespesaAguaForm(forms.ModelForm):
-    fatura         = forms.DecimalField(label="R$ Fatura",    max_digits=10, decimal_places=2, required=False)
-    m3_total       = forms.DecimalField(label="m³ Total",     max_digits=10, decimal_places=4, required=False)
-    valor_m3_agua  = forms.DecimalField(label="R$ por m³ Água", max_digits=10, decimal_places=4, required=False)
+    fatura         = forms.DecimalField(label="R$ Fatura",    max_digits=10, decimal_places=2, required=False, min_value=0)
+    m3_total       = forms.DecimalField(label="m³ Total",     max_digits=10, decimal_places=4, required=False, min_value=0)
+    valor_m3_agua  = forms.DecimalField(label="R$ por m³ Água", max_digits=10, decimal_places=4, required=False, min_value=0)
 
     class Meta:
         model = Despesa
