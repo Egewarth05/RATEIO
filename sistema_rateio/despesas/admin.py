@@ -176,7 +176,7 @@ class DespesaAdmin(admin.ModelAdmin):
 
     energia_fieldsets = (
         (None, {
-            'fields': ('tipo', 'mes', 'ano', 'get_valor_total'),
+            'fields': ('tipo', 'mes', 'ano', 'get_valor_total', 'ativo'),
         }),
         ('Parâmetros de Energia Salão', {
             'fields': ('fatura', 'kwh_total', 'custo_kwh', 'uso_kwh'),
