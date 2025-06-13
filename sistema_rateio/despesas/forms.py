@@ -31,12 +31,13 @@ class DespesaEnergiaForm(forms.ModelForm):
         inst = super().save(commit=False)
         inst.energia_leituras = {
             'params': {
-                'fatura':    float(self.cleaned_data.get('fatura',    0)),
-                'kwh_total': float(self.cleaned_data.get('kwh_total', 1)),
-                'custo_kwh': float(self.cleaned_data.get('custo_kwh',0)),
-                'uso_kwh':   float(self.cleaned_data.get('uso_kwh',  0)),
+                'fatura':    float(self.cleaned_data.get('fatura',    0) or 0),
+                'kwh_total': float(self.cleaned_data.get('kwh_total', 0) or 0),
+                'custo_kwh': float(self.cleaned_data.get('custo_kwh', 0) or 0),
+                'uso_kwh':   float(self.cleaned_data.get('uso_kwh',   0) or 0),
             },
-            'leituras': getattr(inst, 'energia_leituras', {}).get('leituras', {})
+            # aqui é que mudamos:
+            'leituras': (inst.energia_leituras or {}).get('leituras', {}),
         }
         if commit:
             inst.save()
