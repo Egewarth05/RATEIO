@@ -14,6 +14,7 @@ import json
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Q, Sum
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
 
 MESES_CHOICES = [
     (1,  'Janeiro'),
@@ -32,6 +33,7 @@ MESES_CHOICES = [
 
 ANOS_DISPONIVEIS = [2025, 2026, 2027]
 
+@login_required
 def lista_despesas(request):
     current_sort = request.GET.get('sort', 'recentes')
     qs = (
@@ -147,7 +149,7 @@ def lista_despesas(request):
         'current_sort':     current_sort,
     })
 
-
+@login_required
 def nova_despesa(request):
     tipos = (
         TipoDespesa.objects
@@ -712,6 +714,7 @@ def nova_despesa(request):
     })
 
 @csrf_exempt
+@login_required
 def limpar_rateio(request, despesa_id):
     if request.method == 'POST':
         try:
@@ -725,6 +728,7 @@ def limpar_rateio(request, despesa_id):
     return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
 @csrf_exempt
+@login_required
 def editar_rateio(request, rateio_id):
     if request.method == 'POST':
         try:
@@ -742,6 +746,7 @@ def editar_rateio(request, rateio_id):
     return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
 @csrf_exempt
+@login_required
 def excluir_despesa(request, despesa_id):
     if request.method == 'POST':
         try:
@@ -756,6 +761,7 @@ def excluir_despesa(request, despesa_id):
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
     return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
+@login_required
 def editar_despesa(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
 
@@ -890,6 +896,7 @@ def editar_despesa(request, despesa_id):
         'nf_info': nf_info_total,
     })
 
+@login_required
 def ver_rateio(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
     valor_exibido = despesa.valor_total
@@ -1242,7 +1249,7 @@ def ver_rateio(request, despesa_id):
         })
     return render(request, 'despesas/ver_rateio.html', context)
 
-
+@login_required
 def ajax_ultima_agua(request):
     """
     Retorna via JSON os params de água do mês anterior para o tipo/mes/ano enviados.
@@ -1270,7 +1277,7 @@ def ajax_ultima_agua(request):
         data = desp.agua_leituras['params']
     return JsonResponse(data)
 
-
+@login_required
 def limpar_tudo(request):
     # apaga todas as despesas (e cascata todos os rateios)
     post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)

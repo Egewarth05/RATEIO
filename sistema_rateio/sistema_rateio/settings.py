@@ -120,3 +120,8 @@ PARAMETROS_AGUA_JSON = BASE_DIR / "parametros_agua.json"
 PARAMETROS_GAS_JSON  = BASE_DIR / "parametros_gas.json"
 PARAMETROS_ENERGIA_JSON = BASE_DIR / "parametros_energia.json"
 PARAMETROS_LEITURAS_JSON = os.path.join(BASE_DIR, "parametros_leituras.json")
+
+# Autenticação
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'lista_despesas'
+LOGOUT_REDIRECT_URL = 'login'
