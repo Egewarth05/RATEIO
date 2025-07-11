@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Login{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-4">
@@ -15,10 +16,19 @@
       </div>
       <div class="mb-3">
         <label class="form-label">Senha</label>
-        <input type="password" name="password" class="form-control" required>
         <div class="input-group">
-          <input type="password" name="password" id="password" class="form-control" required>
-          <button type="button" class="btn btn-outline-secondary" id="toggle-password">
+          <input
+            type="password"
+            name="password"
+            id="password"
+            class="form-control"
+            required
+          >
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="toggle-password"
+          >
             <i class="bi bi-eye"></i>
           </button>
         </div>
@@ -32,13 +42,13 @@
 {% block scripts %}
   {{ block.super }}
   <script>
-    document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('DOMContentLoaded', () => {
       const toggleBtn = document.getElementById('toggle-password');
       const passwordInput = document.getElementById('password');
-      toggleBtn.addEventListener('click', function () {
-        const isPassword = passwordInput.type === 'password';
-        passwordInput.type = isPassword ? 'text' : 'password';
-        this.innerHTML = isPassword
+      toggleBtn.addEventListener('click', () => {
+        const isHidden = passwordInput.type === 'password';
+        passwordInput.type = isHidden ? 'text' : 'password';
+        toggleBtn.innerHTML = isHidden
           ? '<i class="bi bi-eye-slash"></i>'
           : '<i class="bi bi-eye"></i>';
       });
