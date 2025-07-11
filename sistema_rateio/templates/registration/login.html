@@ -16,9 +16,32 @@
       <div class="mb-3">
         <label class="form-label">Senha</label>
         <input type="password" name="password" class="form-control" required>
+        <div class="input-group">
+          <input type="password" name="password" id="password" class="form-control" required>
+          <button type="button" class="btn btn-outline-secondary" id="toggle-password">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary w-100">Entrar</button>
     </form>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ block.super }}
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const toggleBtn = document.getElementById('toggle-password');
+      const passwordInput = document.getElementById('password');
+      toggleBtn.addEventListener('click', function () {
+        const isPassword = passwordInput.type === 'password';
+        passwordInput.type = isPassword ? 'text' : 'password';
+        this.innerHTML = isPassword
+          ? '<i class="bi bi-eye-slash"></i>'
+          : '<i class="bi bi-eye"></i>';
+      });
+    });
+  </script>
 {% endblock %}
