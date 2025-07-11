@@ -1,0 +1,5 @@
+# Ignorar arquivos de sistema do Windows
+desktop.ini
+
+# Ignorar caches de bytecode Python
+__pycache__/
