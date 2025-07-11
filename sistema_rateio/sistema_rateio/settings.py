@@ -13,7 +13,7 @@ SECRET_KEY = 'django-insecure-&e&a8!+(qs)ba7gyq872cir=2$aurql_)ubj1xtfk3jdg04n)i
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['egewarth.pythonanywhere.com']
+ALLOWED_HOSTS = ['inatec.pythonanywhere.com']
 
 
 # Application definition
@@ -58,7 +58,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'sistema_rateio.wsgi.application'
 
-
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
@@ -68,7 +67,6 @@ DATABASES = {
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -99,7 +97,6 @@ TIME_ZONE = 'America/Sao_Paulo'
 USE_I18N = True
 
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
