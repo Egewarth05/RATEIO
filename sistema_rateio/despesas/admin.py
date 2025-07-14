@@ -52,6 +52,7 @@ from .models import (
     DespesaSemSala,
     DespesaReparoComSala,
     DespesaReparoSemSala,
+    LogAlteracao,
     )
 
 BASE_TIPOS = [
@@ -2579,3 +2580,9 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+@admin.register(LogAlteracao)
+class LogAlteracaoAdmin(admin.ModelAdmin):
+    list_display = ("criado_em", "modelo", "objeto_id", "acao", "usuario")
+    list_filter = ("modelo", "acao", "usuario")
+    date_hierarchy = "criado_em"
