@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Login{% endblock %}
-
+{% load static %}
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-md-4">
@@ -34,6 +34,12 @@
         </div>
       </div>
       <button type="submit" class="btn btn-primary w-100">Entrar</button>
+      <!-- AQUI: logo centralizada abaixo do botão Entrar -->
+      <div class="text-center mt-4">
+        <img
+            src="{% static 'img/Logo-com-CRC.png' %}"
+            alt="Logo Inatec"
+            style="height:80px; object-fit:contain;">
     </form>
   </div>
 </div>
