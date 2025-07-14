@@ -12,9 +12,6 @@
 
     <!-- Admin acima de Excluir Todas (direita) -->
     <div class="d-flex flex-column align-items-end">
-      <a href="{% url 'admin:index' %}" class="btn btn-outline-secondary mb-2">
-        Admin
-      </a>
       <a href="{% url 'limpar_tudo' %}"
        class="btn btn-outline-danger"
        onclick="return confirm('Tem certeza que deseja excluir TODAS as despesas?');">
