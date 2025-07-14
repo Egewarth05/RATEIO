@@ -12,18 +12,45 @@
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 <body class="container py-4">
-    <nav class="mb-4 text-end">
-      {% if user.is_authenticated %}
-        <span class="me-2">{{ user.username }}</span>
-        <form method="post" action="{% url 'logout' %}" class="d-inline">
-          {% csrf_token %}
-          <button type="submit" class="btn btn-outline-secondary btn-sm">Sair</button>
-        </form>
-      {% endif %}
+    <nav class="mb-4 d-flex justify-content-between align-items-center">
+      <!-- LADO ESQUERDO: botão Admin -->
+      <div>
+        {% if user.is_authenticated %}
+          <a href="{% url 'admin:index' %}" class="btn btn-outline-secondary btn-sm">
+            Admin
+          </a>
+        {% endif %}
+      </div>
+
+      <!-- LADO DIREITO: usuário e logout -->
+      <div class="text-end">
+        {% if user.is_authenticated %}
+          <span class="me-2">{{ user.username }}</span>
+          <form method="post" action="{% url 'logout' %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary btn-sm">
+              Sair
+            </button>
+          </form>
+        {% endif %}
+      </div>
     </nav>
+
+    <br>
+
     {% block content %}
     {% endblock %}
-    {% block scripts %}{% endblock %}
+    {% block scripts %}
+    {{ block.super }}
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const btn = document.getElementById('theme-toggle');
+        btn.addEventListener('click', () => {
+          document.body.classList.toggle('neo-condomino');
+        });
+      });
+    </script>
+    {% endblock %}
 
 </body>
 </html>
