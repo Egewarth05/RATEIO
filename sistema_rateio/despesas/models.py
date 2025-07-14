@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Sum
 from decimal import Decimal
 from django.db.models import JSONField
+from django.conf import settings
 
 MESES_CHOICES = [
     ('1', 'Janeiro'), ('2', 'Fevereiro'), ('3', 'Março'),
@@ -426,3 +427,25 @@ class ExportarXlsx(Despesa):
         proxy = True
         verbose_name = "Exportar XLSX"
         verbose_name_plural = "Exportar XLSX"
+
+class LogAlteracao(models.Model):
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        verbose_name="Usuário",
+    )
+    modelo = models.CharField(max_length=100)
+    objeto_id = models.CharField(max_length=50)
+    acao = models.CharField(max_length=20)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    descricao = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Log de Alteração"
+        verbose_name_plural = "Logs de Alterações"
+        ordering = ["-criado_em"]
+
+    def __str__(self):
+        user = self.usuario.username if self.usuario else "?"
+        return f"{self.modelo} {self.objeto_id} {self.acao} por {user}"
