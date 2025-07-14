@@ -26,7 +26,10 @@
   <nav class="mb-4 text-end">
     {% if user.is_authenticated %}
       <span class="me-2">{{ user.username }}</span>
-      <a href="{% url 'logout' %}" class="btn btn-outline-secondary btn-sm">Sair</a>
+      <form method="post" action="{% url 'logout' %}" class="d-inline">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-secondary btn-sm">Sair</button>
+      </form>
     {% endif %}
   </nav>
   <!-- container único dos botões -->
