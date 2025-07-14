@@ -36,3 +36,4 @@ class DespesasConfig(AppConfig):
                     json.dump(data, f, ensure_ascii=False, indent=2)
 
         import despesas.signals
+        import despesas.logsignals
