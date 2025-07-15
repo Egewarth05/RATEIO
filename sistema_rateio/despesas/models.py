@@ -429,23 +429,34 @@ class ExportarXlsx(Despesa):
         verbose_name_plural = "Exportar XLSX"
 
 class LogAlteracao(models.Model):
-    usuario = models.ForeignKey(
+    usuario    = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        null=True,
+        null=True, blank=True,
         on_delete=models.SET_NULL,
-        verbose_name="Usuário",
+        verbose_name="Usuário"
     )
-    modelo = models.CharField(max_length=100)
-    objeto_id = models.CharField(max_length=50)
-    acao = models.CharField(max_length=20)
-    criado_em = models.DateTimeField(auto_now_add=True)
-    descricao = models.TextField(blank=True)
+    modelo     = models.CharField(max_length=100)
+    objeto_id  = models.CharField(max_length=50)
+    acao       = models.CharField(max_length=20)
+    criado_em  = models.DateTimeField(auto_now_add=True)
+    descricao  = models.TextField(blank=True)
+
+    despesa    = models.ForeignKey(
+        "Despesa",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,     # ← trocar CASCADE por SET_NULL
+        related_name='logs'
+    )
+
+    # === novo campo ===
+    valor      = models.DecimalField(
+        "Valor da despesa", max_digits=12, decimal_places=2,
+        null=True, blank=True,
+        help_text="Guarda o valor_total na criação/alteração"
+    )
 
     class Meta:
         verbose_name = "Log de Alteração"
         verbose_name_plural = "Logs de Alterações"
         ordering = ["-criado_em"]
-
-    def __str__(self):
-        user = self.usuario.username if self.usuario else "?"
-        return f"{self.modelo} {self.objeto_id} {self.acao} por {user}"
