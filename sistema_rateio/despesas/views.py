@@ -4,11 +4,9 @@ from django.http import JsonResponse
 from .forms import DespesaForm
 from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
-    LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
+    LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia, LogAlteracao
 )
 from django.db import transaction
-from django.db.models.signals import post_delete
-from .signals import recalc_fundo_reserva
 from datetime import datetime
 import json
 from decimal import Decimal, ROUND_HALF_UP
@@ -482,6 +480,20 @@ def nova_despesa(request):
                 'leituras': leituras_anteriores,
             }
 
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = despesa.descricao or '',
+                despesa    = despesa,        # <— usa o FK direto
+                valor      = despesa.valor_total,
+            )
+            for u, v in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+            return redirect('lista_despesas')
+
         # === ÁGUA ===
         elif tipo.nome.lower() == "água":
 
@@ -679,6 +691,16 @@ def nova_despesa(request):
 
         despesa.valor_total = total
         despesa.save()
+        # --- adiciona entrada no LogAlteracao ---
+        LogAlteracao.objects.create(
+            usuario    = request.user,
+            modelo     = 'Despesa',
+            objeto_id  = str(despesa.pk),
+            acao       = 'Criada',
+            descricao  = despesa.descricao or '',
+            despesa    = despesa,        # <— usa o FK direto
+            valor      = despesa.valor_total,
+        )
         for u, v in valores_por_unidade.items():
             Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
 
@@ -719,9 +741,22 @@ def limpar_rateio(request, despesa_id):
     if request.method == 'POST':
         try:
             desp = Despesa.objects.get(id=despesa_id)
-            Rateio.objects.filter(despesa=desp).delete()
-            desp.valor_total = 0
-            desp.save()
+            # —> cria o log de exclusão antes de apagar
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(desp.pk),
+                acao       = 'Excluída',
+                descricao  = desp.descricao or '',
+                despesa    = desp,
+                valor      = desp.valor_total,
+            )
+            # se for tipo água, remove leituras associadas
+            if desp.tipo.nome.lower() == "água":
+                LeituraAgua.objects.filter(
+                    mes=int(desp.mes), ano=desp.ano
+                ).delete()
+            desp.delete()
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
@@ -745,17 +780,33 @@ def editar_rateio(request, rateio_id):
             return JsonResponse({'success': False, 'error': str(e)})
     return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
-@csrf_exempt
 @login_required
+@csrf_exempt
 def excluir_despesa(request, despesa_id):
     if request.method == 'POST':
         try:
             desp = Despesa.objects.get(id=despesa_id)
+
+            # 1) cria o log de exclusão, guardando o valor_total
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(desp.pk),
+                acao       = 'Excluída',
+                descricao  = desp.descricao or '',
+                despesa    = desp,            # FK agora é SET_NULL on delete
+                valor      = desp.valor_total,
+            )
+
+            # 2) se for água, apaga leituras mas NÃO apaga o log
             if desp.tipo.nome.lower() == "água":
                 LeituraAgua.objects.filter(
                     mes=int(desp.mes), ano=desp.ano
                 ).delete()
+
+            # 3) exclui a despesa (os logs continuam no banco, com despesa=NULL)
             desp.delete()
+
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
@@ -815,7 +866,15 @@ def editar_despesa(request, despesa_id):
         despesa.nf_info = nf_com
         despesa.valor_total = total_com
         despesa.save()
-
+        LogAlteracao.objects.create(
+            usuario    = request.user,
+            modelo     = 'Despesa',
+            objeto_id  = str(despesa.pk),
+            acao       = 'Criada',
+            descricao  = despesa.descricao or '',
+            despesa    = despesa,        # <— usa o FK direto
+            valor      = despesa.valor_total,
+        )
         if tipo_nome == 'reparos/reforma':
             sem_nome = 'Reparo/Reforma (Sem a Sala)'
         else:
@@ -1279,13 +1338,6 @@ def ajax_ultima_agua(request):
 
 @login_required
 def limpar_tudo(request):
-    # apaga todas as despesas (e cascata todos os rateios)
-    post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
-    try:
-        with transaction.atomic():
-            Despesa.objects.update(ativo=False)
-    finally:
-        # Garante que os sinais voltem a estar conectados
-        post_delete.connect(recalc_fundo_reserva, sender=Despesa)
+    Despesa.objects.update(ativo=False)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
