@@ -2583,6 +2583,5 @@ class ExportarXlsxAdmin(admin.ModelAdmin):
 
 @admin.register(LogAlteracao)
 class LogAlteracaoAdmin(admin.ModelAdmin):
-    list_display = ("criado_em", "modelo", "objeto_id", "acao", "usuario")
-    list_filter = ("modelo", "acao", "usuario")
-    date_hierarchy = "criado_em"
+    list_display = ('usuario','modelo','objeto_id','acao','valor','criado_em')
+    readonly_fields = ('usuario','modelo','objeto_id','acao','descricao','despesa','valor','criado_em')
