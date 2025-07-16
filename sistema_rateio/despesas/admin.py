@@ -294,6 +294,19 @@ class DespesaAdmin(admin.ModelAdmin):
         return f"{total_kwh:.4f}"
     total_leituras.short_description = 'Total Leituras (kWh)'
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if change:
+            LogAlteracao.objects.create(
+                usuario=request.user,
+                modelo='Despesa',
+                objeto_id=str(obj.pk),
+                acao='Alterada',
+                descricao=obj.descricao or '',
+                despesa=obj,
+                valor=obj.valor_total,
+            )
+
 @admin.register(Rateio)
 class RateioAdmin(admin.ModelAdmin):
     list_display = ('id', 'despesa', 'unidade', 'valor')
