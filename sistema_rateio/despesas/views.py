@@ -4,15 +4,27 @@ from django.http import JsonResponse
 from .forms import DespesaForm
 from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
-    LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia, LogAlteracao
+    LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
 )
 from django.db import transaction
+from django.db.models.signals import post_delete
+from .signals import recalc_fundo_reserva
 from datetime import datetime
 import json
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Q, Sum
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.decorators import login_required
+
+def parse_float(v, default=0):
+    """
+    Tenta converter v (string ou número) em float,
+    trocando vírgula por ponto. Se falhar, retorna default.
+    """
+    try:
+        return float(str(v).replace(',', '.'))
+    except (ValueError, TypeError):
+        return default
 
 MESES_CHOICES = [
     (1,  'Janeiro'),
@@ -31,19 +43,17 @@ MESES_CHOICES = [
 
 ANOS_DISPONIVEIS = [2025, 2026, 2027]
 
+
 @login_required
 def lista_despesas(request):
     current_sort = request.GET.get('sort', 'recentes')
-    qs = (
-        Despesa.objects.filter(ativo=True)
-        .exclude(tipo__nome__iexact='Fundo de Reserva')
-    )
+    qs = Despesa.objects.filter(ativo=True) \
+                       .exclude(tipo__nome__iexact='Fundo de Reserva')
 
-    # filtros de tipo / mês / ano
+    # capturando filtros
     tipo = request.GET.get('tipo')
     mes  = request.GET.get('mes')
     ano  = request.GET.get('ano')
-
     if tipo:
         qs = qs.filter(tipo_id=tipo)
     if mes:
@@ -51,22 +61,26 @@ def lista_despesas(request):
     if ano:
         qs = qs.filter(ano=ano)
 
-    # ordenação
+    # Ordem
     if current_sort == 'alpha':
-        qs = qs.order_by('tipo__nome', 'ano', 'mes')
+        qs = qs.order_by('tipo__nome','ano','mes')
     else:
         qs = qs.order_by('-id')
 
-    despesas = (
-        qs
-        .filter(valor_total__gt=0)
-    )
-    despesas = qs
+    # Somente quando não filtrou por tipo, injetamos o “Sem Sala Comercial”
+    if not tipo:
+        sem_nome = 'Material Consumo (Sem Sala Comercial)'
+        despesas = qs.filter(
+            Q(valor_total__gt=0) |
+            Q(tipo__nome__iexact=sem_nome)
+        )
+    else:
+        despesas = qs
 
-    # AQUI: para **todos** os objetos, usamos valor_total como valor_exibido.
+    # resto do seu cálculo de valor_exibido para 'Energia Áreas Comuns'…
     for d in despesas:
-        if d.tipo and d.tipo.nome.lower() == 'energia áreas comuns':
-            # 1) pegar a fatura e o custo_kwh da despesa "Energia Salão"
+        if d.tipo.nome.lower() == 'energia áreas comuns':
+            # pega fatura e custo_kwh da última “Energia Salão”
             energia = (
                 Despesa.objects
                 .filter(
@@ -77,63 +91,34 @@ def lista_despesas(request):
                 .order_by('-id')
                 .first()
             )
-
             if energia and energia.energia_leituras:
-                params = energia.energia_leituras.get('params', {})
-                raw_fatura = params.get('fatura', 0)
-                raw_custo = params.get('custo_kwh', 0)
+                params     = energia.energia_leituras.get('params', {})
+                raw_fat    = params.get('fatura', 0)
+                raw_cus    = params.get('custo_kwh', 0)
             else:
-                fatura_obj = (
-                    Despesa.objects
-                    .filter(
-                        mes=str(int(d.mes)),
-                        ano=d.ano,
-                        tipo__nome__iexact='Fatura Energia Elétrica'
-                    )
-                    .order_by('-id')
-                    .first()
-                )
-                if fatura_obj:
-                    raw_fatura = fatura_obj.valor_total
-                else:
-                    raw_fatura = d.valor_total
-                raw_custo = 0
+                raw_fat, raw_cus = d.valor_total, 0
 
             try:
-                fatura = Decimal(str(raw_fatura))
-            except Exception:
-                fatura = Decimal('0')
-            try:
-                custo = Decimal(str(raw_custo))
-            except Exception:
-                custo = Decimal('0')
+                fatura = Decimal(str(raw_fat))
+                custo  = Decimal(str(raw_cus))
+            except:
+                fatura = custo = Decimal('0')
 
-            # 2) total de kWh consumidos no mês
-            try:
-                mes_int = int(d.mes)
-                ano_int = int(d.ano)
-                agregado = (
-                    LeituraEnergia.objects
-                    .filter(mes=mes_int, ano=ano_int)
-                    .aggregate(total=Sum('leitura'))
-                )
-                total_kwh = agregado.get('total') or Decimal('0')
-            except Exception:
-                total_kwh = Decimal('0')
+            agregado = (
+                LeituraEnergia.objects
+                .filter(mes=int(d.mes), ano=int(d.ano))
+                .aggregate(total=Sum('leitura'))
+            )
+            total_kwh = agregado.get('total') or Decimal('0')
 
-            # 3) cálculo final
             d.valor_exibido = (
                 fatura - (custo * total_kwh)
             ).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         else:
             d.valor_exibido = d.valor_total
 
-    anos_distintos = despesas.values_list('ano', flat=True).distinct()
-    anos_distintos = sorted(int(a) for a in anos_distintos)
-
-    meses_distintos = despesas.values_list('mes', flat=True).distinct()
-    meses_distintos = sorted(int(m) for m in meses_distintos)
-
+    anos_distintos = sorted(int(a) for a in despesas.values_list('ano', flat=True).distinct())
+    meses_distintos = sorted(int(m) for m in despesas.values_list('mes', flat=True).distinct())
     tipos_distintos = TipoDespesa.objects.filter(
         id__in=despesas.values_list('tipo_id', flat=True).distinct()
     )
@@ -147,7 +132,6 @@ def lista_despesas(request):
         'tipos_distintos':  tipos_distintos,
         'current_sort':     current_sort,
     })
-
 @login_required
 def nova_despesa(request):
     tipos = (
@@ -386,32 +370,39 @@ def nova_despesa(request):
             despesa.valor_total = total_com
             despesa.save()
 
-            tipo_sem = TipoDespesa.objects.get(nome__iexact='Material Consumo (Sem Sala Comercial)')
-            despesa_sem, created = Despesa.objects.get_or_create(
-                tipo=tipo_sem,
-                mes=despesa.mes,
-                ano=despesa.ano,
-                defaults={
-                    'descricao':   despesa.descricao,
-                    'valor_total': total_sem,
-                    'ativo':       True,
-                }
-            )
-            if not created:
+            if tipo.nome.lower() == 'material/serviço de consumo':
+                tipo_sem_nome = 'Material Consumo (Sem Sala Comercial)'
+            else:
+                tipo_sem_nome = 'Reparo/Reforma (Sem a Sala)'
+
+            tipo_sem = TipoDespesa.objects.filter(
+                nome__iexact=tipo_sem_nome
+            ).first()
+            despesa_sem = None
+            if tipo_sem:
+                despesa_sem, created = Despesa.objects.update_or_create(
+                    tipo=tipo_sem,
+                    mes=despesa.mes,
+                    ano=despesa.ano,
+                    defaults={
+                        'descricao':   despesa.descricao,
+                        'valor_total': total_sem,
+                        'ativo':       True,       # agora garantimos que ela fique visível
+                    }
+                )
+                despesa_sem.nf_info   = nf_sem
                 despesa_sem.valor_total = total_sem
-                despesa_sem.descricao   = despesa.descricao
-                despesa_sem.ativo       = True
+                despesa_sem.ativo     = True    # para o caso de já existir mas estar inativo
                 despesa_sem.save()
 
-            # monta o mapa de percentuais do “Sem Sala”
             fracoes_sem_map = {
                 f.unidade.id: float(f.percentual)
                 for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
-            }
+            } if tipo_sem else {}
 
-            # 1️⃣ calcula valores por unidade para cada despesa
             valores_com = {}
             valores_sem = {}
+
             if fracoes_map:
                 for u in unidades:
                     pct_com = fracoes_map.get(u.id, 0)
@@ -421,29 +412,19 @@ def nova_despesa(request):
             else:
                 share_com = total_com / len(unidades) if unidades else 0
                 share_sem = total_sem / len(unidades) if unidades else 0
+
                 for u in unidades:
                     valores_com[u] = share_com
                     valores_sem[u] = share_sem
 
-            #  limpa rateios antigos
             Rateio.objects.filter(despesa=despesa).delete()
-            Rateio.objects.filter(despesa=despesa_sem).delete()
+            if despesa_sem:
+                Rateio.objects.filter(despesa=despesa_sem).delete()
 
-            #  recria rateios para ambas despesas
             for u in unidades:
-                Rateio.objects.create(despesa=despesa,     unidade=u, valor=valores_com[u])
-                Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem[u])
-
-            # registra log de criação para Material/Serviço de Consumo
-            LogAlteracao.objects.create(
-                usuario    = request.user,
-                modelo     = 'Despesa',
-                objeto_id  = str(despesa.pk),
-                acao       = 'Criada',
-                descricao  = despesa.descricao or '',
-                despesa    = despesa,
-                valor      = despesa.valor_total,
-            )
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
+                if despesa_sem:
+                    Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
             messages.success(request, 'Despesa cadastrada com sucesso!')
             return redirect('lista_despesas')
 
@@ -485,20 +466,6 @@ def nova_despesa(request):
                 },
                 'leituras': leituras_anteriores,
             }
-
-            despesa.save()
-            LogAlteracao.objects.create(
-                usuario    = request.user,
-                modelo     = 'Despesa',
-                objeto_id  = str(despesa.pk),
-                acao       = 'Criada',
-                descricao  = despesa.descricao or '',
-                despesa    = despesa,        # <— usa o FK direto
-                valor      = despesa.valor_total,
-            )
-            for u, v in valores_por_unidade.items():
-                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
-            return redirect('lista_despesas')
 
         # === ÁGUA ===
         elif tipo.nome.lower() == "água":
@@ -697,16 +664,6 @@ def nova_despesa(request):
 
         despesa.valor_total = total
         despesa.save()
-        # --- adiciona entrada no LogAlteracao ---
-        LogAlteracao.objects.create(
-            usuario    = request.user,
-            modelo     = 'Despesa',
-            objeto_id  = str(despesa.pk),
-            acao       = 'Criada',
-            descricao  = despesa.descricao or '',
-            despesa    = despesa,        # <— usa o FK direto
-            valor      = despesa.valor_total,
-        )
         for u, v in valores_por_unidade.items():
             Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
 
@@ -747,22 +704,9 @@ def limpar_rateio(request, despesa_id):
     if request.method == 'POST':
         try:
             desp = Despesa.objects.get(id=despesa_id)
-            # —> cria o log de exclusão antes de apagar
-            LogAlteracao.objects.create(
-                usuario    = request.user,
-                modelo     = 'Despesa',
-                objeto_id  = str(desp.pk),
-                acao       = 'Excluída',
-                descricao  = desp.descricao or '',
-                despesa    = desp,
-                valor      = desp.valor_total,
-            )
-            # se for tipo água, remove leituras associadas
-            if desp.tipo.nome.lower() == "água":
-                LeituraAgua.objects.filter(
-                    mes=int(desp.mes), ano=desp.ano
-                ).delete()
-            desp.delete()
+            Rateio.objects.filter(despesa=desp).delete()
+            desp.valor_total = 0
+            desp.save()
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
@@ -771,68 +715,32 @@ def limpar_rateio(request, despesa_id):
 @csrf_exempt
 @login_required
 def editar_rateio(request, rateio_id):
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'Método não permitido'})
-    data = json.loads(request.body)
-    rateio = get_object_or_404(Rateio, id=rateio_id)
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            novo_valor = float(data.get('valor', 0))
+            rateio = Rateio.objects.get(id=rateio_id)
+            rateio.valor = novo_valor
+            rateio.save()
+            total = Rateio.objects.filter(despesa=rateio.despesa).aggregate(Sum('valor'))['valor__sum'] or 0
+            rateio.despesa.valor_total = total
+            rateio.despesa.save()
+            return JsonResponse({'success': True, 'novo_total': round(total, 2)})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Método não permitido'})
 
-    # 1) captura valor antigo
-    old_val = rateio.valor
-
-    # 2) atribui o novo valor e salva
-    novo_val = float(data.get('valor', 0))
-    rateio.valor = novo_val
-    rateio.save()
-
-    # 3) recalcula total da despesa
-    desp = rateio.despesa
-    total = Rateio.objects.filter(despesa=desp).aggregate(Sum('valor'))['valor__sum'] or 0
-    desp.valor_total = total
-    desp.save()
-
-    # 4) registra o log de edição incluindo unidade, valor anterior e novo
-    LogAlteracao.objects.create(
-        usuario    = request.user,
-        modelo     = 'Despesa',
-        objeto_id  = str(desp.pk),
-        acao       = 'Alterada',
-        descricao  = (
-            f"Rateio da unidade “{rateio.unidade.nome}”: "
-            f"R$ {old_val:.2f} → R$ {novo_val:.2f}"
-        ),
-        despesa    = desp,
-        valor      = total,
-    )
-
-    return JsonResponse({'success': True, 'novo_total': round(total, 2)})
-
-@login_required
 @csrf_exempt
+@login_required
 def excluir_despesa(request, despesa_id):
     if request.method == 'POST':
         try:
             desp = Despesa.objects.get(id=despesa_id)
-
-            # 1) cria o log de exclusão, guardando o valor_total
-            LogAlteracao.objects.create(
-                usuario    = request.user,
-                modelo     = 'Despesa',
-                objeto_id  = str(desp.pk),
-                acao       = 'Excluída',
-                descricao  = desp.descricao or '',
-                despesa    = desp,            # FK agora é SET_NULL on delete
-                valor      = desp.valor_total,
-            )
-
-            # 2) se for água, apaga leituras mas NÃO apaga o log
             if desp.tipo.nome.lower() == "água":
                 LeituraAgua.objects.filter(
                     mes=int(desp.mes), ano=desp.ano
                 ).delete()
-
-            # 3) exclui a despesa (os logs continuam no banco, com despesa=NULL)
             desp.delete()
-
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
             return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
@@ -840,38 +748,92 @@ def excluir_despesa(request, despesa_id):
 
 @login_required
 def editar_despesa(request, despesa_id):
-    despesa = get_object_or_404(Despesa, id=despesa_id)
+    despesa   = get_object_or_404(Despesa, id=despesa_id)
     tipo_nome = despesa.tipo.nome.lower()
     if tipo_nome not in ['material/serviço de consumo', 'reparos/reforma']:
-        messages.error(
-            request,
-            'Despesa não é do tipo Material/Serviço de Consumo ou Reparos/Reforma.'
-        )
+        messages.error(request, 'Tipo inválido para edição de NF.')
         return redirect('lista_despesas')
 
-    unidades = Unidade.objects.order_by('nome')
+    # nomes fixos
+    COM_NOME = 'material/serviço de consumo'
+    SEM_NOME = 'material consumo (sem sala comercial)'
+
+    unidades   = Unidade.objects.order_by('nome')
     fracoes_map = {
         f.unidade.id: float(f.percentual)
         for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
     }
 
-    def parse_float(v, default=0):
-        try:
-            return float(str(v).replace(',', '.'))
-        except:
-            return default
+    # 1) NFs “Com Sala”
+    nf_info_com = []
+    if tipo_nome == COM_NOME:
+        # estamos editando a própria despesa “com sala”
+        nf_info_com = [
+            {
+                'fornecedor': nf.get('fornecedor',''),
+                'historico':  nf.get('historico',''),
+                'numero':     nf.get('numero',''),
+                'tipo':       nf.get('tipo','com'),
+                'valor':      Decimal(str(nf.get('valor',0))),
+            }
+            for nf in (despesa.nf_info or [])
+        ]
+    else:
+        # buscar a despesa “com sala” para carregar as NFs
+        tipo_com = TipoDespesa.objects.filter(nome__iexact='Material/Serviço de Consumo').first()
+        if tipo_com:
+            ds_com = Despesa.objects.filter(
+                tipo=tipo_com, mes=despesa.mes, ano=despesa.ano
+            ).first()
+            if ds_com and ds_com.nf_info:
+                nf_info_com = [
+                    {
+                        'fornecedor': nf.get('fornecedor',''),
+                        'historico':  nf.get('historico',''),
+                        'numero':     nf.get('numero',''),
+                        'tipo':       nf.get('tipo','com'),
+                        'valor':      Decimal(str(nf.get('valor',0))),
+                    }
+                    for nf in ds_com.nf_info
+                ]
 
-    # carregar dados já existentes de nf_sem
-    sem_nome = 'Reparo/Reforma (Sem a Sala)' if tipo_nome == 'reparos/reforma' else 'Material Consumo (Sem Sala Comercial)'
-    tipo_sem = TipoDespesa.objects.filter(nome__iexact=sem_nome).first()
+    # 2) NFs “Sem Sala”
     nf_info_sem = []
-    if tipo_sem:
-        despesa_sem = Despesa.objects.filter(tipo=tipo_sem, mes=despesa.mes, ano=despesa.ano).first()
-        if despesa_sem and despesa_sem.nf_info:
-            nf_info_sem = despesa_sem.nf_info
+    if tipo_nome == SEM_NOME:
+        nf_info_sem = [
+            {
+                'fornecedor': nf.get('fornecedor',''),
+                'historico':  nf.get('historico',''),
+                'numero':     nf.get('numero',''),
+                'tipo':       nf.get('tipo','sem'),
+                'valor':      Decimal(str(nf.get('valor',0))),
+            }
+            for nf in (despesa.nf_info or [])
+        ]
+    else:
+        tipo_sem = TipoDespesa.objects.filter(
+            nome__iexact='Material Consumo (Sem Sala Comercial)'
+        ).first()
+        if tipo_sem:
+            ds_sem = Despesa.objects.filter(
+                tipo=tipo_sem, mes=despesa.mes, ano=despesa.ano
+            ).first()
+            if ds_sem and ds_sem.nf_info:
+                nf_info_sem = [
+                    {
+                        'fornecedor': nf.get('fornecedor',''),
+                        'historico':  nf.get('historico',''),
+                        'numero':     nf.get('numero',''),
+                        'tipo':       nf.get('tipo','sem'),
+                        'valor':      Decimal(str(nf.get('valor',0))),
+                    }
+                    for nf in ds_sem.nf_info
+                ]
+
+    # 3) junta e renderiza
+    nf_info_total = nf_info_com + nf_info_sem
 
     if request.method == 'POST':
-        # montar entradas de NF
         nf_entries = []
         idx = 0
         while True:
@@ -881,7 +843,7 @@ def editar_despesa(request, despesa_id):
             val = parse_float(request.POST.get(key))
             forn = request.POST.get(f'nf_fornecedor_{idx}', '').strip()
             hist = request.POST.get(f'nf_historico_{idx}', '').strip()
-            num = request.POST.get(f'nf_numero_{idx}', '').strip()
+            num  = request.POST.get(f'nf_numero_{idx}', '').strip()
             tipo_nf = request.POST.get(f'nf_tipo_{idx}', 'com')
             if forn or hist or num or val:
                 nf_entries.append({
@@ -894,18 +856,25 @@ def editar_despesa(request, despesa_id):
             idx += 1
 
         nf_com = [e for e in nf_entries if (e.get('tipo') or 'com') != 'sem']
-        nf_sem   = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
+        nf_sem = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
         total_com = sum(e['valor'] for e in nf_com)
         total_sem = sum(e['valor'] for e in nf_sem)
 
-        # atualizar despesa principal
         despesa.nf_info = nf_com
         despesa.valor_total = total_com
         despesa.save()
 
-        # atualizar/ criar despesa sem sala
+        if tipo_nome == 'reparos/reforma':
+            sem_nome = 'Reparo/Reforma (Sem a Sala)'
+        else:
+            sem_nome = 'Material Consumo (Sem Sala Comercial)'
+
+        tipo_sem = TipoDespesa.objects.filter(
+            nome__iexact=sem_nome
+        ).first()
+        despesa_sem = None
         if tipo_sem:
-            despesa_sem, created = Despesa.objects.update_or_create(
+            despesa_sem, _ = Despesa.objects.update_or_create(
                 tipo=tipo_sem,
                 mes=despesa.mes,
                 ano=despesa.ano,
@@ -915,32 +884,24 @@ def editar_despesa(request, despesa_id):
                     'ativo':       True,
                 }
             )
-            despesa_sem.nf_info = nf_sem
+            despesa_sem.nf_info   = nf_sem
+            despesa_sem.valor_total = total_sem
+            despesa_sem.ativo     = True
             despesa_sem.save()
 
-        # recalcular rateios para ambas
-        Rateio.objects.filter(despesa=despesa).delete()
-        if tipo_sem:
-            Rateio.objects.filter(despesa=despesa_sem).delete()
-
-        # gerar mapas de percentual para cada tipo
-        fracoes_sem_map = {}
-        if tipo_sem:
-            fracoes_sem_map = {
-                f.unidade.id: float(f.percentual)
-                for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
-            }
+        fracoes_sem_map = {
+            f.unidade.id: float(f.percentual)
+            for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
+        } if tipo_sem else {}
 
         valores_com = {}
         valores_sem = {}
-        # se houver frações, usar percentuais; senão dividir igualmente
         if fracoes_map:
             for u in unidades:
                 pct_com = fracoes_map.get(u.id, 0)
+                pct_sem = fracoes_sem_map.get(u.id, 0)
                 valores_com[u] = total_com * pct_com
-                if tipo_sem:
-                    pct_sem = fracoes_sem_map.get(u.id, 0)
-                    valores_sem[u] = total_sem * pct_sem
+                valores_sem[u] = total_sem * pct_sem
         else:
             share_com = total_com / len(unidades) if unidades else 0
             share_sem = total_sem / len(unidades) if unidades else 0
@@ -948,27 +909,38 @@ def editar_despesa(request, despesa_id):
                 valores_com[u] = share_com
                 valores_sem[u] = share_sem
 
-        # criar novos rateios
+        Rateio.objects.filter(despesa=despesa).delete()
+        if despesa_sem:
+            Rateio.objects.filter(despesa=despesa_sem).delete()
+
         for u in unidades:
-            Rateio.objects.create(despesa=despesa,     unidade=u, valor=valores_com.get(u, 0))
-            if tipo_sem:
+            Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
+            if despesa_sem:
                 Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
 
-        # log e retorno
-        LogAlteracao.objects.create(
-            usuario    = request.user,
-            modelo     = 'Despesa',
-            objeto_id  = str(despesa.pk),
-            acao       = 'Alterada',
-            descricao  = despesa.descricao or '',
-            despesa    = despesa,
-            valor      = despesa.valor_total,
-        )
         messages.success(request, 'Despesa atualizada com sucesso!')
         return redirect('lista_despesas')
 
-    # GET: renderizar formulário com dados existentes
+    if tipo_nome == 'reparos/reforma':
+        sem_nome = 'Reparo/Reforma (Sem a Sala)'
+    else:
+        sem_nome = 'Material Consumo (Sem Sala Comercial)'
+
+    tipo_sem = TipoDespesa.objects.filter(
+        nome__iexact=sem_nome
+    ).first()
+    nf_info_sem = []
+    if tipo_sem:
+        despesa_sem = Despesa.objects.filter(
+            tipo=tipo_sem,
+            mes=despesa.mes,
+            ano=despesa.ano
+        ).first()
+        if despesa_sem and despesa_sem.nf_info:
+            nf_info_sem = despesa_sem.nf_info
+
     nf_info_total = (despesa.nf_info or []) + nf_info_sem
+
     return render(request, 'despesas/editar_despesa.html', {
         'despesa': despesa,
         'nf_info': nf_info_total,
@@ -1289,6 +1261,8 @@ def ver_rateio(request, despesa_id):
             'valor_exibido': valor_exibido,
         })
 
+
+
     # --- FRAÇÃO ---
     fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
     if fracoes_qs.exists():
@@ -1355,6 +1329,13 @@ def ajax_ultima_agua(request):
 
 @login_required
 def limpar_tudo(request):
-    Despesa.objects.update(ativo=False)
+    # apaga todas as despesas (e cascata todos os rateios)
+    post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
+    try:
+        with transaction.atomic():
+            Despesa.objects.update(ativo=False)
+    finally:
+        # Garante que os sinais voltem a estar conectados
+        post_delete.connect(recalc_fundo_reserva, sender=Despesa)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
