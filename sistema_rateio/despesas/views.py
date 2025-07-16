@@ -61,6 +61,7 @@ def lista_despesas(request):
         qs
         .filter(valor_total__gt=0)
     )
+    despesas = qs
 
     # AQUI: para **todos** os objetos, usamos valor_total como valor_exibido.
     for d in despesas:
@@ -385,37 +386,32 @@ def nova_despesa(request):
             despesa.valor_total = total_com
             despesa.save()
 
-            if tipo.nome.lower() == 'material/serviço de consumo':
-                tipo_sem_nome = 'Material Consumo (Sem Sala Comercial)'
-            else:
-                tipo_sem_nome = 'Reparo/Reforma (Sem a Sala)'
-
-            tipo_sem = TipoDespesa.objects.filter(
-                nome__iexact=tipo_sem_nome
-            ).first()
-            despesa_sem = None
-            if tipo_sem:
-                despesa_sem, _ = Despesa.objects.update_or_create(
-                    tipo=tipo_sem,
-                    mes=despesa.mes,
-                    ano=despesa.ano,
-                    defaults={
-                        'descricao': despesa.descricao,
-                        'valor_total': total_sem,
-                    }
-                )
-                despesa_sem.nf_info = nf_sem
+            tipo_sem = TipoDespesa.objects.get(nome__iexact='Material Consumo (Sem Sala Comercial)')
+            despesa_sem, created = Despesa.objects.get_or_create(
+                tipo=tipo_sem,
+                mes=despesa.mes,
+                ano=despesa.ano,
+                defaults={
+                    'descricao':   despesa.descricao,
+                    'valor_total': total_sem,
+                    'ativo':       True,
+                }
+            )
+            if not created:
                 despesa_sem.valor_total = total_sem
+                despesa_sem.descricao   = despesa.descricao
+                despesa_sem.ativo       = True
                 despesa_sem.save()
 
+            # monta o mapa de percentuais do “Sem Sala”
             fracoes_sem_map = {
                 f.unidade.id: float(f.percentual)
                 for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
-            } if tipo_sem else {}
+            }
 
+            # 1️⃣ calcula valores por unidade para cada despesa
             valores_com = {}
             valores_sem = {}
-
             if fracoes_map:
                 for u in unidades:
                     pct_com = fracoes_map.get(u.id, 0)
@@ -425,19 +421,29 @@ def nova_despesa(request):
             else:
                 share_com = total_com / len(unidades) if unidades else 0
                 share_sem = total_sem / len(unidades) if unidades else 0
-
                 for u in unidades:
                     valores_com[u] = share_com
                     valores_sem[u] = share_sem
 
+            #  limpa rateios antigos
             Rateio.objects.filter(despesa=despesa).delete()
-            if despesa_sem:
-                Rateio.objects.filter(despesa=despesa_sem).delete()
+            Rateio.objects.filter(despesa=despesa_sem).delete()
 
+            #  recria rateios para ambas despesas
             for u in unidades:
-                Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
-                if despesa_sem:
-                    Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
+                Rateio.objects.create(despesa=despesa,     unidade=u, valor=valores_com[u])
+                Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem[u])
+
+            # registra log de criação para Material/Serviço de Consumo
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = despesa.descricao or '',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
             messages.success(request, 'Despesa cadastrada com sucesso!')
             return redirect('lista_despesas')
 
@@ -765,20 +771,40 @@ def limpar_rateio(request, despesa_id):
 @csrf_exempt
 @login_required
 def editar_rateio(request, rateio_id):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            novo_valor = float(data.get('valor', 0))
-            rateio = Rateio.objects.get(id=rateio_id)
-            rateio.valor = novo_valor
-            rateio.save()
-            total = Rateio.objects.filter(despesa=rateio.despesa).aggregate(Sum('valor'))['valor__sum'] or 0
-            rateio.despesa.valor_total = total
-            rateio.despesa.save()
-            return JsonResponse({'success': True, 'novo_total': round(total, 2)})
-        except Exception as e:
-            return JsonResponse({'success': False, 'error': str(e)})
-    return JsonResponse({'success': False, 'error': 'Método não permitido'})
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Método não permitido'})
+    data = json.loads(request.body)
+    rateio = get_object_or_404(Rateio, id=rateio_id)
+
+    # 1) captura valor antigo
+    old_val = rateio.valor
+
+    # 2) atribui o novo valor e salva
+    novo_val = float(data.get('valor', 0))
+    rateio.valor = novo_val
+    rateio.save()
+
+    # 3) recalcula total da despesa
+    desp = rateio.despesa
+    total = Rateio.objects.filter(despesa=desp).aggregate(Sum('valor'))['valor__sum'] or 0
+    desp.valor_total = total
+    desp.save()
+
+    # 4) registra o log de edição incluindo unidade, valor anterior e novo
+    LogAlteracao.objects.create(
+        usuario    = request.user,
+        modelo     = 'Despesa',
+        objeto_id  = str(desp.pk),
+        acao       = 'Alterada',
+        descricao  = (
+            f"Rateio da unidade “{rateio.unidade.nome}”: "
+            f"R$ {old_val:.2f} → R$ {novo_val:.2f}"
+        ),
+        despesa    = desp,
+        valor      = total,
+    )
+
+    return JsonResponse({'success': True, 'novo_total': round(total, 2)})
 
 @login_required
 @csrf_exempt
@@ -815,7 +841,6 @@ def excluir_despesa(request, despesa_id):
 @login_required
 def editar_despesa(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
-
     tipo_nome = despesa.tipo.nome.lower()
     if tipo_nome not in ['material/serviço de consumo', 'reparos/reforma']:
         messages.error(
@@ -833,10 +858,20 @@ def editar_despesa(request, despesa_id):
     def parse_float(v, default=0):
         try:
             return float(str(v).replace(',', '.'))
-        except Exception:
+        except:
             return default
 
+    # carregar dados já existentes de nf_sem
+    sem_nome = 'Reparo/Reforma (Sem a Sala)' if tipo_nome == 'reparos/reforma' else 'Material Consumo (Sem Sala Comercial)'
+    tipo_sem = TipoDespesa.objects.filter(nome__iexact=sem_nome).first()
+    nf_info_sem = []
+    if tipo_sem:
+        despesa_sem = Despesa.objects.filter(tipo=tipo_sem, mes=despesa.mes, ano=despesa.ano).first()
+        if despesa_sem and despesa_sem.nf_info:
+            nf_info_sem = despesa_sem.nf_info
+
     if request.method == 'POST':
+        # montar entradas de NF
         nf_entries = []
         idx = 0
         while True:
@@ -846,7 +881,7 @@ def editar_despesa(request, despesa_id):
             val = parse_float(request.POST.get(key))
             forn = request.POST.get(f'nf_fornecedor_{idx}', '').strip()
             hist = request.POST.get(f'nf_historico_{idx}', '').strip()
-            num  = request.POST.get(f'nf_numero_{idx}', '').strip()
+            num = request.POST.get(f'nf_numero_{idx}', '').strip()
             tipo_nf = request.POST.get(f'nf_tipo_{idx}', 'com')
             if forn or hist or num or val:
                 nf_entries.append({
@@ -859,58 +894,53 @@ def editar_despesa(request, despesa_id):
             idx += 1
 
         nf_com = [e for e in nf_entries if (e.get('tipo') or 'com') != 'sem']
-        nf_sem = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
+        nf_sem   = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
         total_com = sum(e['valor'] for e in nf_com)
         total_sem = sum(e['valor'] for e in nf_sem)
 
+        # atualizar despesa principal
         despesa.nf_info = nf_com
         despesa.valor_total = total_com
         despesa.save()
-        LogAlteracao.objects.create(
-            usuario    = request.user,
-            modelo     = 'Despesa',
-            objeto_id  = str(despesa.pk),
-            acao       = 'Criada',
-            descricao  = despesa.descricao or '',
-            despesa    = despesa,        # <— usa o FK direto
-            valor      = despesa.valor_total,
-        )
-        if tipo_nome == 'reparos/reforma':
-            sem_nome = 'Reparo/Reforma (Sem a Sala)'
-        else:
-            sem_nome = 'Material Consumo (Sem Sala Comercial)'
 
-        tipo_sem = TipoDespesa.objects.filter(
-            nome__iexact=sem_nome
-        ).first()
-        despesa_sem = None
+        # atualizar/ criar despesa sem sala
         if tipo_sem:
-            despesa_sem, _ = Despesa.objects.update_or_create(
+            despesa_sem, created = Despesa.objects.update_or_create(
                 tipo=tipo_sem,
                 mes=despesa.mes,
                 ano=despesa.ano,
                 defaults={
-                    'descricao': despesa.descricao,
+                    'descricao':   despesa.descricao,
                     'valor_total': total_sem,
+                    'ativo':       True,
                 }
             )
             despesa_sem.nf_info = nf_sem
-            despesa_sem.valor_total = total_sem
             despesa_sem.save()
 
-        fracoes_sem_map = {
-            f.unidade.id: float(f.percentual)
-            for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
-        } if tipo_sem else {}
+        # recalcular rateios para ambas
+        Rateio.objects.filter(despesa=despesa).delete()
+        if tipo_sem:
+            Rateio.objects.filter(despesa=despesa_sem).delete()
+
+        # gerar mapas de percentual para cada tipo
+        fracoes_sem_map = {}
+        if tipo_sem:
+            fracoes_sem_map = {
+                f.unidade.id: float(f.percentual)
+                for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem)
+            }
 
         valores_com = {}
         valores_sem = {}
+        # se houver frações, usar percentuais; senão dividir igualmente
         if fracoes_map:
             for u in unidades:
                 pct_com = fracoes_map.get(u.id, 0)
-                pct_sem = fracoes_sem_map.get(u.id, 0)
                 valores_com[u] = total_com * pct_com
-                valores_sem[u] = total_sem * pct_sem
+                if tipo_sem:
+                    pct_sem = fracoes_sem_map.get(u.id, 0)
+                    valores_sem[u] = total_sem * pct_sem
         else:
             share_com = total_com / len(unidades) if unidades else 0
             share_sem = total_sem / len(unidades) if unidades else 0
@@ -918,38 +948,27 @@ def editar_despesa(request, despesa_id):
                 valores_com[u] = share_com
                 valores_sem[u] = share_sem
 
-        Rateio.objects.filter(despesa=despesa).delete()
-        if despesa_sem:
-            Rateio.objects.filter(despesa=despesa_sem).delete()
-
+        # criar novos rateios
         for u in unidades:
-            Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
-            if despesa_sem:
+            Rateio.objects.create(despesa=despesa,     unidade=u, valor=valores_com.get(u, 0))
+            if tipo_sem:
                 Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
 
+        # log e retorno
+        LogAlteracao.objects.create(
+            usuario    = request.user,
+            modelo     = 'Despesa',
+            objeto_id  = str(despesa.pk),
+            acao       = 'Alterada',
+            descricao  = despesa.descricao or '',
+            despesa    = despesa,
+            valor      = despesa.valor_total,
+        )
         messages.success(request, 'Despesa atualizada com sucesso!')
         return redirect('lista_despesas')
 
-    if tipo_nome == 'reparos/reforma':
-        sem_nome = 'Reparo/Reforma (Sem a Sala)'
-    else:
-        sem_nome = 'Material Consumo (Sem Sala Comercial)'
-
-    tipo_sem = TipoDespesa.objects.filter(
-        nome__iexact=sem_nome
-    ).first()
-    nf_info_sem = []
-    if tipo_sem:
-        despesa_sem = Despesa.objects.filter(
-            tipo=tipo_sem,
-            mes=despesa.mes,
-            ano=despesa.ano
-        ).first()
-        if despesa_sem and despesa_sem.nf_info:
-            nf_info_sem = despesa_sem.nf_info
-
+    # GET: renderizar formulário com dados existentes
     nf_info_total = (despesa.nf_info or []) + nf_info_sem
-
     return render(request, 'despesas/editar_despesa.html', {
         'despesa': despesa,
         'nf_info': nf_info_total,
@@ -1269,8 +1288,6 @@ def ver_rateio(request, despesa_id):
             'total_leituras': total_leituras,
             'valor_exibido': valor_exibido,
         })
-
-
 
     # --- FRAÇÃO ---
     fracoes_qs = FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa.tipo)
