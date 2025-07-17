@@ -6,6 +6,7 @@ from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
     LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
 )
+from .models import LogAlteracao
 from django.db import transaction
 from django.db.models.signals import post_delete
 from .signals import recalc_fundo_reserva
@@ -394,6 +395,16 @@ def nova_despesa(request):
                 despesa_sem.valor_total = total_sem
                 despesa_sem.ativo     = True    # para o caso de já existir mas estar inativo
                 despesa_sem.save()
+                # ——— registra log da criação “sem sala” ———
+                LogAlteracao.objects.create(
+                    usuario    = request.user,
+                    modelo     = 'Despesa',
+                    objeto_id  = str(despesa_sem.pk),
+                    acao       = 'Criada (Sem Sala Comercial)',
+                    descricao  = despesa_sem.descricao or '',
+                    despesa    = despesa_sem,
+                    valor      = despesa_sem.valor_total,
+                )
 
             fracoes_sem_map = {
                 f.unidade.id: float(f.percentual)
@@ -425,6 +436,15 @@ def nova_despesa(request):
                 Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
                 if despesa_sem:
                     Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
+            LogAlteracao.objects.create(
+               usuario    = request.user,
+               modelo     = 'Despesa',
+               objeto_id  = str(despesa.pk),
+               acao       = 'Criada',
+               descricao  = despesa.descricao or '',
+               despesa    = despesa,
+               valor      = despesa.valor_total,
+           )
             messages.success(request, 'Despesa cadastrada com sucesso!')
             return redirect('lista_despesas')
 
@@ -467,6 +487,19 @@ def nova_despesa(request):
                 'leituras': leituras_anteriores,
             }
 
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Gás: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+
+            return redirect('lista_despesas')
+
         # === ÁGUA ===
         elif tipo.nome.lower() == "água":
 
@@ -497,6 +530,19 @@ def nova_despesa(request):
                 },
                 'leituras': leituras_agua_anteriores,
             }
+
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Água: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+
+            return redirect('lista_despesas')
 
         # === FUNDO DE RESERVA ===
         elif tipo.nome.lower() == "fundo de reserva":
@@ -534,7 +580,15 @@ def nova_despesa(request):
             despesa.save()
             for un, val in valores_por_unidade.items():
                 Rateio.objects.create(despesa=despesa, unidade=un, valor=val)
-
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Fundo de Reserva: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
             return redirect('lista_despesas')
 
         # === ENERGIA SALÃO ===
@@ -593,7 +647,15 @@ def nova_despesa(request):
             for u, v in valores_por_unidade.items():
                 if v > 0:
                     Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
-
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Energia Salão: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
             return redirect('lista_despesas')
 
         # --- ENERGIA ÁREAS COMUNS (único bloco) ---
@@ -631,29 +693,83 @@ def nova_despesa(request):
                 share = (restante * pct).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 Rateio.objects.create(despesa=despesa, unidade=f.unidade, valor=share)
 
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Energia Áreas Comuns: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+
             return redirect('lista_despesas')
 
         # === FATURA ENERGIA ELÉTRICA ===
         elif tipo.nome.lower() == "fatura energia elétrica":
             despesa.valor_total = parse_float(request.POST.get('valor_unico', 0))
             despesa.save()
+
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Fatura Energia Elétrica: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+
             return redirect('lista_despesas')
 
-        # === TAXA BOLETO ===
+                # === TAXA BOLETO ===
         elif tipo.nome.lower() == "taxa boleto":
             valor_boleto = parse_float(request.POST.get('valor_unico'))
             for u in unidades:
                 valores_por_unidade[u] = valor_boleto
                 total += valor_boleto
 
+            despesa.valor_total = total
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'Taxa Boleto: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+            return redirect('lista_despesas')
+
         # === FRAÇÃO (por tipo de despesa) ===
         elif fracoes_map:
             valor_unico = parse_float(request.POST.get('valor_unico'))
+            valores_por_unidade = {}
+            total = 0
             for u in unidades:
                 pct = fracoes_map.get(u.id, 0)
                 v   = valor_unico * pct
                 valores_por_unidade[u] = v
                 total += v
+
+            despesa.valor_total = total
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'{tipo.nome}: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+
+            for u, v in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+
+            messages.success(request, 'Despesa cadastrada com sucesso!')
+            return redirect('lista_despesas')
 
         # === PADRÃO ===
         else:
@@ -662,13 +778,22 @@ def nova_despesa(request):
                 valores_por_unidade[u] = v
                 total += v
 
-        despesa.valor_total = total
-        despesa.save()
-        for u, v in valores_por_unidade.items():
-            Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
+            despesa.valor_total = total
+            despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(despesa.pk),
+                acao       = 'Criada',
+                descricao  = f'{tipo.nome}: R$ {despesa.valor_total:.2f}',
+                despesa    = despesa,
+                valor      = despesa.valor_total,
+            )
+            for u, v in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
 
-        messages.success(request, 'Despesa cadastrada com sucesso!')
-        return redirect('lista_despesas')
+            messages.success(request, 'Despesa cadastrada com sucesso!')
+            return redirect('lista_despesas')
 
     return render(request, 'despesas/nova_despesa.html', {
         'form':                         form,
@@ -720,11 +845,25 @@ def editar_rateio(request, rateio_id):
             data = json.loads(request.body)
             novo_valor = float(data.get('valor', 0))
             rateio = Rateio.objects.get(id=rateio_id)
+            # captura o valor antes de gravar
+            old_val = float(rateio.valor)
             rateio.valor = novo_valor
             rateio.save()
             total = Rateio.objects.filter(despesa=rateio.despesa).aggregate(Sum('valor'))['valor__sum'] or 0
             rateio.despesa.valor_total = total
             rateio.despesa.save()
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Rateio',
+                objeto_id  = str(rateio.pk),
+                acao       = 'Alterada',
+                descricao  = (
+                   f"Rateio da unidade “{rateio.unidade.nome}”: "
+                   f"R$ {old_val:.2f} → R$ {novo_valor:.2f}"
+                ),
+                despesa    = rateio.despesa,
+                valor      = total,
+            )
             return JsonResponse({'success': True, 'novo_total': round(total, 2)})
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
@@ -740,6 +879,16 @@ def excluir_despesa(request, despesa_id):
                 LeituraAgua.objects.filter(
                     mes=int(desp.mes), ano=desp.ano
                 ).delete()
+            # ——— registra log de exclusão ———
+            LogAlteracao.objects.create(
+                usuario    = request.user,
+                modelo     = 'Despesa',
+                objeto_id  = str(desp.pk),
+                acao       = 'Excluída',
+                descricao  = desp.descricao or '',
+                despesa    = desp,
+                valor      = desp.valor_total,
+            )
             desp.delete()
             return JsonResponse({'success': True})
         except Despesa.DoesNotExist:
