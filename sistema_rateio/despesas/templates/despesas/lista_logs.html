@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .table-font-sm td,
+  .table-font-sm th {
+    font-size: 0.8rem !important;
+    vertical-align: middle;
+  }
+</style>
+
+<h1>Logs de Alterações</h1>
+
+<form method="GET" action="{% url 'lista_logs' %}" class="mb-4 p-3 border rounded bg-light">
+  <div class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label for="tipo" class="form-label">Filtrar por Despesa</label>
+      <select name="tipo" id="tipo" class="form-select form-select-sm">
+        <option value="">Todas</option>
+        {% for tipo in tipos_unicos %}
+        <option value="{{ tipo }}" {% if tipo == current_tipo %}selected{% endif %}>{{ tipo }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label for="usuario" class="form-label">Filtrar por Usuário</label>
+      <select name="usuario" id="usuario" class="form-select form-select-sm">
+        <option value="">Todos</option>
+        {% for u in usuarios_unicos %}
+        <option value="{{ u.id }}" {% if u.id == current_usuario %}selected{% endif %}>{{ u.username }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6 d-flex justify-content-start align-items-end">
+      <button type="submit" class="btn btn-primary btn-sm me-2">Aplicar Filtros</button>
+      <a href="{% url 'lista_logs' %}" class="btn btn-secondary btn-sm">Limpar Filtros</a>
+    </div>
+  </div>
+</form>
+
+<div class="d-flex justify-content-end mb-2">
+  <form action="{% url 'limpar_logs' %}" method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-outline-danger btn-sm"
+      onclick="return confirm('Tem certeza que deseja apagar TODOS os logs? Esta ação não pode ser desfeita.');">
+      Limpar Todos os Logs
+    </button>
+  </form>
+</div>
+
+<table class="table table-bordered table-font-sm">
+  <thead>
+    <tr>
+      <th>
+        <a href="?sort=date_desc&tipo={{current_tipo}}&usuario={{current_usuario}}">Quando ▼</a> |
+        <a href="?sort=date_asc&tipo={{current_tipo}}&usuario={{current_usuario}}">▲</a>
+      </th>
+      <th>Usuário</th>
+      <th>Despesa</th>
+      <th>Mês Ref.</th>
+      <th>Ação</th>
+      <th>Descrição</th>
+      <th>
+        <a href="?sort=valor_desc&tipo={{current_tipo}}&usuario={{current_usuario}}">Valor ▼</a> |
+        <a href="?sort=valor_asc&tipo={{current_tipo}}&usuario={{current_usuario}}">▲</a>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr>
+      <td>{{ log.criado_em|date:"d/m/Y H:i" }}</td>
+      <td>{{ log.usuario.username }}</td>
+      <td>
+        {% if log.despesa %}
+        {{ log.despesa.tipo.nome }}
+        {% else %}
+        {{ log.modelo }}
+        {% endif %}
+      </td>
+      {# --- CÉLULA FALTANDO ADICIONADA AQUI --- #}
+      <td>
+        {% if log.despesa %}
+        {{ log.despesa.get_mes_display }}/{{ log.despesa.ano }}
+        {% endif %}
+      </td>
+      <td>{{ log.acao }}</td>
+      <td>{{ log.descricao }}</td>
+      <td>
+        {% if log.valor %}
+        R$ {{ log.valor|floatformat:2 }}
+        {% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr>
+      {# --- COLSPAN CORRIGIDO DE 6 PARA 7 --- #}
+      <td colspan="7" class="text-center">Nenhum log encontrado para os filtros selecionados.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
