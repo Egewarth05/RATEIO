@@ -173,12 +173,13 @@
         }
 
         document.addEventListener('DOMContentLoaded', function () {
-            // Exclusão de despesa
+            // --- CÓDIGO CORRIGIDO PARA EXCLUSÃO DE DESPESA ---
             document.querySelectorAll('.btn-excluir').forEach(botao => {
                 botao.addEventListener('click', function () {
                     const despesaId = this.dataset.id;
                     if (confirm("Tem certeza que deseja excluir esta despesa?")) {
-                        fetch(`/despesas/limpar_rateio/${despesaId}/`, {
+                        // URL CORRIGIDA para apontar para a view que apaga a despesa
+                        fetch(`/despesas/despesa/${despesaId}/excluir/`, {
                             method: 'POST',
                             headers: {
                                 'X-CSRFToken': getCookie('csrftoken'),
@@ -186,18 +187,23 @@
                         })
                         .then(res => res.json())
                         .then(data => {
-                          if (data.success) {
-                            location.reload();
-                          } else {
-                            alert(`Erro ao excluir: ${data.error || "sem detalhe"}`);
-                          }
+                            if (data.success) {
+                                // Ação CORRIGIDA: remove a linha da tabela em vez de recarregar
+                                this.closest('tr').remove();
+                                alert('Despesa excluída com sucesso!');
+                            } else {
+                                alert(`Erro ao excluir: ${data.error || "sem detalhe"}`);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Erro:', error);
+                            alert('Ocorreu um erro de comunicação.');
                         });
-
                     }
                 });
             });
 
-            // Atualiza o valor total ao voltar do rateio
+            // O resto do seu script para atualizar valor total...
             const novoTotal = sessionStorage.getItem('valor_total_atualizado');
             const despesaId = sessionStorage.getItem('despesa_id_atualizado');
             if (novoTotal && despesaId) {
@@ -211,7 +217,6 @@
         });
     </script>
 
-    <!-- Bootstrap 5 bundle (inclui Popper) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
         integrity="sha384‐kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+Y5qmk0sm+W0nLMwNLD69Npy4HI+N"
         crossorigin="anonymous"></script>
