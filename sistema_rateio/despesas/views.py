@@ -6,6 +6,7 @@ from .models import (
     Despesa, Unidade, Rateio, TipoDespesa,
     LeituraGas, LeituraAgua, FracaoPorTipoDespesa, LeituraEnergia
 )
+from django.contrib.auth.models import User
 from .models import LogAlteracao
 from django.db import transaction
 from django.db.models.signals import post_delete
@@ -44,6 +45,69 @@ MESES_CHOICES = [
 
 ANOS_DISPONIVEIS = [2025, 2026, 2027]
 
+@login_required
+def lista_logs(request):
+    # --- Início da Modificação ---
+
+    # Pega os parâmetros da URL. Se não existirem, usa um valor padrão.
+    sort_order = request.GET.get('sort', '-criado_em') # Padrão: mais novo primeiro
+    filter_tipo = request.GET.get('tipo', '')
+    filter_usuario = request.GET.get('usuario', '')
+
+    # Começa com todos os logs
+    logs_qs = LogAlteracao.objects.select_related('despesa', 'usuario').all()
+
+    # Aplica os filtros se eles foram enviados
+    if filter_tipo:
+        logs_qs = logs_qs.filter(modelo=filter_tipo)
+
+    if filter_usuario:
+        logs_qs = logs_qs.filter(usuario_id=filter_usuario)
+
+    # Dicionário de opções de ordenação válidas para segurança
+    ordering_options = {
+        'date_asc': 'criado_em',
+        'date_desc': '-criado_em',
+        'valor_asc': 'valor',
+        'valor_desc': '-valor',
+    }
+    # Usa a ordenação do dicionário, ou a padrão se a opção for inválida
+    ordering = ordering_options.get(sort_order, '-criado_em')
+    logs_qs = logs_qs.order_by(ordering)
+
+    # Pega dados para popular os dropdowns de filtro
+    tipos_unicos = LogAlteracao.objects.order_by('modelo').values_list('modelo', flat=True).distinct()
+    usuarios_unicos = User.objects.filter(id__in=LogAlteracao.objects.values_list('usuario_id', flat=True).distinct())
+
+    context = {
+        'logs': logs_qs,
+        'tipos_unicos': tipos_unicos,
+        'usuarios_unicos': usuarios_unicos,
+        'current_sort': sort_order,
+        'current_tipo': filter_tipo,
+        'current_usuario': int(filter_usuario) if filter_usuario else '',
+    }
+
+    return render(request, 'despesas/lista_logs.html', context)
+
+@login_required
+def limpar_logs(request):
+    if request.method == 'POST':
+        # apaga todos os logs
+        LogAlteracao.objects.all().delete()
+
+        # registra um único log de Exclusão Total
+        LogAlteracao.objects.create(
+            usuario    = request.user,
+            modelo     = 'Exclusão Total',  # aqui só aparece “Exclusão Total”
+            objeto_id  = 'todos',
+            acao       = 'Exclusão Total',
+            descricao  = 'Todos os logs foram apagados.',
+            despesa    = None,
+            valor      = None,
+        )
+        messages.success(request, 'Logs limpos com sucesso!')
+    return redirect('lista_logs')
 
 @login_required
 def lista_despesas(request):
@@ -872,28 +936,30 @@ def editar_rateio(request, rateio_id):
 @csrf_exempt
 @login_required
 def excluir_despesa(request, despesa_id):
-    if request.method == 'POST':
-        try:
-            desp = Despesa.objects.get(id=despesa_id)
-            if desp.tipo.nome.lower() == "água":
-                LeituraAgua.objects.filter(
-                    mes=int(desp.mes), ano=desp.ano
-                ).delete()
-            # ——— registra log de exclusão ———
-            LogAlteracao.objects.create(
-                usuario    = request.user,
-                modelo     = 'Despesa',
-                objeto_id  = str(desp.pk),
-                acao       = 'Excluída',
-                descricao  = desp.descricao or '',
-                despesa    = desp,
-                valor      = desp.valor_total,
-            )
-            desp.delete()
-            return JsonResponse({'success': True})
-        except Despesa.DoesNotExist:
-            return JsonResponse({'success': False, 'error': 'Despesa não encontrada'})
-    return JsonResponse({'success': False, 'error': 'Método não permitido'})
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Método não permitido'}, status=405)
+
+    desp = get_object_or_404(Despesa, pk=despesa_id)
+
+    # 1) se for água, apaga as leituras
+    if desp.tipo.nome.lower() == "água":
+        LeituraAgua.objects.filter(mes=int(desp.mes), ano=desp.ano).delete()
+
+    # 2) registra o log **antes** de deletar
+    LogAlteracao.objects.create(
+        usuario    = request.user,
+        modelo     = desp.tipo.nome,     # aqui guardamos o tipo da despesa
+        objeto_id  = str(desp.pk),
+        acao       = 'Excluída',
+        descricao  = desp.descricao or '',
+        despesa    = desp,               # mantém o FK para template ainda enxergar
+        valor      = desp.valor_total,
+    )
+
+    # 3) só então exclui a despesa
+    desp.delete()
+
+    return JsonResponse({'success': True})
 
 @login_required
 def editar_despesa(request, despesa_id):
@@ -1478,7 +1544,17 @@ def ajax_ultima_agua(request):
 
 @login_required
 def limpar_tudo(request):
-    # apaga todas as despesas (e cascata todos os rateios)
+    # --- Início da Modificação ---
+    # Cria um log único para registrar a exclusão em massa
+    LogAlteracao.objects.create(
+        usuario=request.user,
+        modelo='Exclusão em Massa',
+        objeto_id='todos',
+        acao='Exclusão Total de Despesas',
+        descricao='Todas as despesas foram marcadas como inativas.',
+        despesa=None,
+        valor=None,  # Pode-se opcionalmente calcular e somar o valor de todas as despesas aqui
+    )
     post_delete.disconnect(recalc_fundo_reserva, sender=Despesa)
     try:
         with transaction.atomic():
