@@ -67,37 +67,36 @@
     </tr>
   </thead>
   <tbody>
-    {% for log in logs %}
-    <tr>
-      <td>{{ log.criado_em|date:"d/m/Y H:i" }}</td>
-      <td>{{ log.usuario.username }}</td>
-      <td>
-        {% if log.despesa %}
-        {{ log.despesa.tipo.nome }}
-        {% else %}
-        {{ log.modelo }}
-        {% endif %}
-      </td>
-      {# --- CÉLULA FALTANDO ADICIONADA AQUI --- #}
-      <td>
-        {% if log.despesa %}
-        {{ log.despesa.get_mes_display }}/{{ log.despesa.ano }}
-        {% endif %}
-      </td>
-      <td>{{ log.acao }}</td>
-      <td>{{ log.descricao }}</td>
-      <td>
-        {% if log.valor %}
-        R$ {{ log.valor|floatformat:2 }}
-        {% endif %}
-      </td>
-    </tr>
-    {% empty %}
-    <tr>
-      {# --- COLSPAN CORRIGIDO DE 6 PARA 7 --- #}
-      <td colspan="7" class="text-center">Nenhum log encontrado para os filtros selecionados.</td>
-    </tr>
-    {% endfor %}
-  </tbody>
+      {% for log in logs %}
+      <tr class="{% if 'Exclusão' in log.modelo %}table-danger{% endif %}">
+        <td>{{ log.criado_em|date:"d/m/Y H:i" }}</td>
+        <td>{{ log.usuario.username }}</td>
+        <td>
+          {# CORRIGIDO: Agora usamos o 'modelo' para o nome da despesa #}
+          {% if 'Exclusão' not in log.modelo %}
+            {{ log.modelo }}
+          {% endif %}
+        </td>
+        <td>
+          {% if log.mes_referencia %}
+            {{ log.get_mes_referencia_display }}/{{ log.ano_referencia }}
+          {% elif log.despesa %}
+            {{ log.despesa.get_mes_display }}/{{ log.despesa.ano }}
+          {% endif %}
+        </td>
+        <td>{{ log.acao }}</td>
+        <td>{{ log.descricao }}</td>
+        <td>
+          {% if log.valor %}
+          R$ {{ log.valor|floatformat:2 }}
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" class="text-center">Nenhum log encontrado para os filtros selecionados.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
 </table>
 {% endblock %}
