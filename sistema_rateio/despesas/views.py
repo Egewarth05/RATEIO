@@ -47,36 +47,43 @@ ANOS_DISPONIVEIS = [2025, 2026, 2027]
 
 @login_required
 def lista_logs(request):
-    # --- Início da Modificação ---
-
-    # Pega os parâmetros da URL. Se não existirem, usa um valor padrão.
-    sort_order = request.GET.get('sort', '-criado_em') # Padrão: mais novo primeiro
+    sort_order = request.GET.get('sort', '-criado_em')
     filter_tipo = request.GET.get('tipo', '')
     filter_usuario = request.GET.get('usuario', '')
 
-    # Começa com todos os logs
-    logs_qs = LogAlteracao.objects.select_related('despesa', 'usuario').all()
+    logs_qs = LogAlteracao.objects.select_related('despesa__tipo', 'usuario').all()
 
-    # Aplica os filtros se eles foram enviados
     if filter_tipo:
-        logs_qs = logs_qs.filter(modelo=filter_tipo)
+        logs_qs = logs_qs.filter(
+            Q(despesa__tipo__nome=filter_tipo) | Q(modelo=filter_tipo)
+        )
 
     if filter_usuario:
         logs_qs = logs_qs.filter(usuario_id=filter_usuario)
 
-    # Dicionário de opções de ordenação válidas para segurança
     ordering_options = {
         'date_asc': 'criado_em',
         'date_desc': '-criado_em',
         'valor_asc': 'valor',
         'valor_desc': '-valor',
     }
-    # Usa a ordenação do dicionário, ou a padrão se a opção for inválida
     ordering = ordering_options.get(sort_order, '-criado_em')
     logs_qs = logs_qs.order_by(ordering)
 
-    # Pega dados para popular os dropdowns de filtro
-    tipos_unicos = LogAlteracao.objects.order_by('modelo').values_list('modelo', flat=True).distinct()
+    # --- Lógica do Filtro Modificada ---
+    tipos_de_despesa = LogAlteracao.objects.filter(despesa__isnull=False).values_list('despesa__tipo__nome', flat=True).distinct()
+
+    # CORREÇÃO: Adicionado .exclude() para remover opções que contenham "Exclusão"
+    outros_modelos = (
+        LogAlteracao.objects.filter(despesa__isnull=True)
+        .exclude(modelo__icontains='Exclusão') # <-- Linha modificada
+        .values_list('modelo', flat=True)
+        .distinct()
+    )
+
+    tipos_unicos = sorted(list(set(list(tipos_de_despesa) + list(outros_modelos))))
+    # --- Fim da Modificação ---
+
     usuarios_unicos = User.objects.filter(id__in=LogAlteracao.objects.values_list('usuario_id', flat=True).distinct())
 
     context = {
@@ -99,9 +106,9 @@ def limpar_logs(request):
         # registra um único log de Exclusão Total
         LogAlteracao.objects.create(
             usuario    = request.user,
-            modelo     = 'Exclusão Total',  # aqui só aparece “Exclusão Total”
+            modelo     = 'Exclusão de Log',  # aqui só aparece “Exclusão Total”
             objeto_id  = 'todos',
-            acao       = 'Exclusão Total',
+            acao       = 'Exclusão de Log',
             descricao  = 'Todos os logs foram apagados.',
             despesa    = None,
             valor      = None,
@@ -462,12 +469,14 @@ def nova_despesa(request):
                 # ——— registra log da criação “sem sala” ———
                 LogAlteracao.objects.create(
                     usuario    = request.user,
-                    modelo     = 'Despesa',
+                    modelo     = despesa_sem.tipo.nome,
                     objeto_id  = str(despesa_sem.pk),
                     acao       = 'Criada (Sem Sala Comercial)',
                     descricao  = despesa_sem.descricao or '',
                     despesa    = despesa_sem,
                     valor      = despesa_sem.valor_total,
+                    mes_referencia=despesa_sem.mes,
+                    ano_referencia=despesa_sem.ano
                 )
 
             fracoes_sem_map = {
@@ -502,12 +511,14 @@ def nova_despesa(request):
                     Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
             LogAlteracao.objects.create(
                usuario    = request.user,
-               modelo     = 'Despesa',
+               modelo     = despesa.tipo.nome,
                objeto_id  = str(despesa.pk),
                acao       = 'Criada',
                descricao  = despesa.descricao or '',
                despesa    = despesa,
                valor      = despesa.valor_total,
+               mes_referencia = despesa.mes,
+               ano_referencia = despesa.ano
            )
             messages.success(request, 'Despesa cadastrada com sucesso!')
             return redirect('lista_despesas')
@@ -551,15 +562,22 @@ def nova_despesa(request):
                 'leituras': leituras_anteriores,
             }
 
+            despesa.valor_total = total
             despesa.save()
+
+            for unidade, valor in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=unidade, valor=valor)
+
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Gás: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
 
             return redirect('lista_despesas')
@@ -595,15 +613,22 @@ def nova_despesa(request):
                 'leituras': leituras_agua_anteriores,
             }
 
+            despesa.valor_total = total
             despesa.save()
+
+            for unidade, valor in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=unidade, valor=valor)
+
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Água: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
 
             return redirect('lista_despesas')
@@ -646,12 +671,14 @@ def nova_despesa(request):
                 Rateio.objects.create(despesa=despesa, unidade=un, valor=val)
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Fundo de Reserva: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
             return redirect('lista_despesas')
 
@@ -713,12 +740,14 @@ def nova_despesa(request):
                     Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Energia Salão: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
             return redirect('lista_despesas')
 
@@ -759,12 +788,14 @@ def nova_despesa(request):
 
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Energia Áreas Comuns: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
 
             return redirect('lista_despesas')
@@ -776,17 +807,19 @@ def nova_despesa(request):
 
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Fatura Energia Elétrica: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
 
             return redirect('lista_despesas')
 
-                # === TAXA BOLETO ===
+        # === TAXA BOLETO (CORRIGIDO) ===
         elif tipo.nome.lower() == "taxa boleto":
             valor_boleto = parse_float(request.POST.get('valor_unico'))
             for u in unidades:
@@ -795,15 +828,25 @@ def nova_despesa(request):
 
             despesa.valor_total = total
             despesa.save()
+
+            # --- LINHAS ADICIONADAS AQUI ---
+            # Salva o rateio de fato para cada unidade
+            for unidade, valor in valores_por_unidade.items():
+                Rateio.objects.create(despesa=despesa, unidade=unidade, valor=valor)
+            # --- FIM DAS LINHAS ADICIONADAS ---
+
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'Taxa Boleto: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
+            messages.success(request, 'Despesa cadastrada com sucesso!') # Adicionado para feedback
             return redirect('lista_despesas')
 
         # === FRAÇÃO (por tipo de despesa) ===
@@ -821,12 +864,14 @@ def nova_despesa(request):
             despesa.save()
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'{tipo.nome}: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
 
             for u, v in valores_por_unidade.items():
@@ -846,12 +891,14 @@ def nova_despesa(request):
             despesa.save()
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Despesa',
+                modelo     = despesa.tipo.nome,
                 objeto_id  = str(despesa.pk),
                 acao       = 'Criada',
                 descricao  = f'{tipo.nome}: R$ {despesa.valor_total:.2f}',
                 despesa    = despesa,
                 valor      = despesa.valor_total,
+                mes_referencia=despesa.mes,
+                ano_referencia=despesa.ano
             )
             for u, v in valores_por_unidade.items():
                 Rateio.objects.create(despesa=despesa, unidade=u, valor=v)
@@ -918,7 +965,7 @@ def editar_rateio(request, rateio_id):
             rateio.despesa.save()
             LogAlteracao.objects.create(
                 usuario    = request.user,
-                modelo     = 'Rateio',
+                modelo     = rateio.despesa.tipo.nome,
                 objeto_id  = str(rateio.pk),
                 acao       = 'Alterada',
                 descricao  = (
@@ -927,6 +974,9 @@ def editar_rateio(request, rateio_id):
                 ),
                 despesa    = rateio.despesa,
                 valor      = total,
+                # Adicionar estas duas linhas:
+                mes_referencia=rateio.despesa.mes,
+                ano_referencia=rateio.despesa.ano
             )
             return JsonResponse({'success': True, 'novo_total': round(total, 2)})
         except Exception as e:
@@ -947,13 +997,15 @@ def excluir_despesa(request, despesa_id):
 
     # 2) registra o log **antes** de deletar
     LogAlteracao.objects.create(
-        usuario    = request.user,
-        modelo     = desp.tipo.nome,     # aqui guardamos o tipo da despesa
-        objeto_id  = str(desp.pk),
-        acao       = 'Excluída',
-        descricao  = desp.descricao or '',
-        despesa    = desp,               # mantém o FK para template ainda enxergar
-        valor      = desp.valor_total,
+        usuario=request.user,
+        modelo=desp.tipo.nome,
+        objeto_id=str(desp.pk),
+        acao='Excluída',
+        descricao=desp.descricao or '',
+        valor=desp.valor_total,
+        despesa=None,  # Apenas uma definição de 'despesa'
+        mes_referencia=desp.mes,
+        ano_referencia=desp.ano
     )
 
     # 3) só então exclui a despesa
@@ -1132,6 +1184,32 @@ def editar_despesa(request, despesa_id):
             Rateio.objects.create(despesa=despesa, unidade=u, valor=valores_com.get(u, 0))
             if despesa_sem:
                 Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
+
+        # Log para a despesa principal ("Com Sala")
+        LogAlteracao.objects.create(
+            usuario=request.user,
+            modelo=despesa.tipo.nome,
+            objeto_id=str(despesa.pk),
+            acao='Editada',
+            descricao=f"Despesa editada. Novo valor com sala: R$ {total_com:.2f}",
+            despesa=despesa,
+            valor=total_com,
+            mes_referencia=despesa.mes,
+            ano_referencia=despesa.ano
+        )
+        # Log para a despesa "sem sala", se ela existir
+        if despesa_sem:
+            LogAlteracao.objects.create(
+                usuario=request.user,
+                modelo=despesa_sem.tipo.nome,
+                objeto_id=str(despesa_sem.pk),
+                acao='Editada',
+                descricao=f"Despesa editada. Novo valor sem sala: R$ {total_sem:.2f}",
+                despesa=despesa_sem,
+                valor=total_sem,
+                mes_referencia=despesa_sem.mes,
+                ano_referencia=despesa_sem.ano
+            )
 
         messages.success(request, 'Despesa atualizada com sucesso!')
         return redirect('lista_despesas')
@@ -1551,7 +1629,7 @@ def limpar_tudo(request):
         modelo='Exclusão em Massa',
         objeto_id='todos',
         acao='Exclusão Total de Despesas',
-        descricao='Todas as despesas foram marcadas como inativas.',
+        descricao='Todas as despesas foram excluídas.',
         despesa=None,
         valor=None,  # Pode-se opcionalmente calcular e somar o valor de todas as despesas aqui
     )
