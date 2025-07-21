@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import nova_despesa, lista_despesas, ver_rateio, excluir_despesa, editar_despesa, editar_rateio, ajax_ultima_agua, limpar_rateio, limpar_tudo
+from .views import nova_despesa, lista_despesas, ver_rateio, excluir_despesa, editar_despesa, editar_rateio, ajax_ultima_agua, limpar_rateio, limpar_tudo, admin_panel
 from . import views
 
 urlpatterns = [
@@ -14,5 +14,6 @@ urlpatterns = [
     path('logs/', views.lista_logs, name='lista_logs'),
     path('logs/limpar/', views.limpar_logs, name='limpar_logs'),
     path('despesa/<int:despesa_id>/excluir/', views.excluir_despesa, name='excluir_despesa'),
+    path('painel-admin/', admin_panel, name='admin_panel'),
 
 ]
