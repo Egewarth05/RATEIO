@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Painel Administrativo{% endblock %}
+
+{% block content %}
+<div class="container text-center" style="max-width: 600px;">
+  <div class="p-5 mb-4 bg-light rounded-3">
+    
+    {% if user.username != 'VANDERLEI' %}
+
+      <h1 class="mb-4">Painel Administrativo</h1>
+      <p class="lead">Selecione a área que deseja acessar.</p>
+      <div class="d-grid gap-3 mx-auto mt-4">
+        <a href="{% url 'admin:index' %}" class="btn btn-primary btn-lg">
+          <i class="bi bi-shield-lock"></i> Acessar Admin Django
+        </a>
+        <a href="{% url 'lista_logs' %}" class="btn btn-info btn-lg text-white">
+          <i class="bi bi-card-list"></i> Ver Logs de Alterações
+        </a>
+      </div>
+
+    {% else %}
+
+      <h1 class="mb-4 text-danger">Acesso Restrito</h1>
+      <p class="lead">Você não tem permissão para acessar estas áreas.</p>
+      <div class="d-grid gap-3 mx-auto mt-4">
+        <button type="button" class="btn btn-primary btn-lg" disabled>
+          <i class="bi bi-slash-circle"></i> Acessar Admin Django
+        </button>
+        <button type="button" class="btn btn-secondary btn-lg" disabled>
+          <i class="bi bi-slash-circle"></i> Ver Logs de Alterações
+        </button>
+      </div>
+
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}
