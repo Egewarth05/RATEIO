@@ -13,6 +13,7 @@ from django.db.models.signals import post_delete
 from .signals import recalc_fundo_reserva
 from datetime import datetime
 import json
+import re
 from decimal import Decimal, ROUND_HALF_UP
 from django.db.models import Q, Sum
 from django.views.decorators.csrf import csrf_exempt
@@ -1012,6 +1013,7 @@ def editar_despesa(request, despesa_id):
         messages.error(request, 'Tipo de despesa inválido para esta edição.')
         return redirect('lista_despesas')
 
+    # Define os nomes das categorias com base na despesa inicial
     if 'reparo' in tipo_nome_inicial:
         com_nome = 'Reparos/Reforma'
         sem_nome = 'Reparo/Reforma (Sem a Sala)'
@@ -1019,30 +1021,51 @@ def editar_despesa(request, despesa_id):
         com_nome = 'Material/Serviço de Consumo'
         sem_nome = 'Material Consumo (Sem Sala Comercial)'
 
-    # Captura do estado antigo
-    despesa_com_antiga = Despesa.objects.filter(tipo__nome__iexact=com_nome, mes=despesa_inicial.mes, ano=despesa_inicial.ano).first()
-    despesa_sem_antiga = Despesa.objects.filter(tipo__nome__iexact=sem_nome, mes=despesa_inicial.mes, ano=despesa_inicial.ano).first()
+    # --- INÍCIO DA CORREÇÃO ---
+    # Busca por TODOS os possíveis registros duplicados para o período, em vez de apenas um.
+    despesas_com_antigas = Despesa.objects.filter(tipo__nome__iexact=com_nome, mes=despesa_inicial.mes, ano=despesa_inicial.ano)
+    despesas_sem_antigas = Despesa.objects.filter(tipo__nome__iexact=sem_nome, mes=despesa_inicial.mes, ano=despesa_inicial.ano)
 
-    old_total_com = despesa_com_antiga.valor_total if despesa_com_antiga else Decimal('0')
-    old_nfs_com = despesa_com_antiga.nf_info if despesa_com_antiga else []
-    old_nf_count_com = len(old_nfs_com)
+    # Consolida as NFs de todos os registros duplicados encontrados
+    old_nfs_com = []
+    for d in despesas_com_antigas:
+        if isinstance(d.nf_info, list):
+            old_nfs_com.extend(d.nf_info)
 
-    old_total_sem = despesa_sem_antiga.valor_total if despesa_sem_antiga else Decimal('0')
-    old_nfs_sem = despesa_sem_antiga.nf_info if despesa_sem_antiga else []
-    old_nf_count_sem = len(old_nfs_sem)
+    old_nfs_sem = []
+    for d in despesas_sem_antigas:
+        if isinstance(d.nf_info, list):
+            old_nfs_sem.extend(d.nf_info)
+    # --- FIM DA CORREÇÃO ---
 
     if request.method == 'POST':
+        # Lógica robusta para ler os dados das NFs do formulário
+        parsed_nfs = {}
+        for key, value in request.POST.items():
+            match = re.match(r'nf_(?P<field>fornecedor|historico|numero|tipo|valor)_(?P<index>\d+)', key)
+            if match:
+                data = match.groupdict()
+                index = int(data['index'])
+                field = data['field']
+
+                if index not in parsed_nfs:
+                    parsed_nfs[index] = {}
+
+                parsed_nfs[index][field] = value.strip()
+
+        # Converte o dicionário de NFs em uma lista ordenada
         nf_entries = []
-        idx = 0
-        while f'nf_valor_{idx}' in request.POST:
-            val = parse_float(request.POST.get(f'nf_valor_{idx}'))
-            forn = request.POST.get(f'nf_fornecedor_{idx}', '').strip()
-            hist = request.POST.get(f'nf_historico_{idx}', '').strip()
-            num  = request.POST.get(f'nf_numero_{idx}', '').strip()
-            tipo_nf = request.POST.get(f'nf_tipo_{idx}', 'com')
-            if forn or hist or num or val:
-                nf_entries.append({'fornecedor': forn, 'historico': hist, 'numero': num, 'tipo': tipo_nf, 'valor': val})
-            idx += 1
+        for index in sorted(parsed_nfs.keys()):
+            nf_data = parsed_nfs[index]
+            # Considera a NF apenas se algum campo estiver preenchido
+            if any(nf_data.get(f) for f in ['fornecedor', 'historico', 'numero', 'valor']):
+                 nf_entries.append({
+                    'fornecedor': nf_data.get('fornecedor', ''),
+                    'historico': nf_data.get('historico', ''),
+                    'numero': nf_data.get('numero', ''),
+                    'tipo': nf_data.get('tipo', 'com'),
+                    'valor': parse_float(nf_data.get('valor', 0)),
+                })
 
         nf_com = [e for e in nf_entries if (e.get('tipo') or 'com') != 'sem']
         nf_sem = [e for e in nf_entries if (e.get('tipo') or 'com') == 'sem']
@@ -1050,98 +1073,89 @@ def editar_despesa(request, despesa_id):
         total_com = Decimal(str(sum(e['valor'] for e in nf_com))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         total_sem = Decimal(str(sum(e['valor'] for e in nf_sem))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # --- INÍCIO DA CORREÇÃO: Substitui update_or_create por uma lógica mais segura ---
-        tipo_com_obj = TipoDespesa.objects.get(nome__iexact=com_nome)
-        despesa_com = Despesa.objects.filter(tipo=tipo_com_obj, mes=despesa_inicial.mes, ano=despesa_inicial.ano).first()
-        if despesa_com:
-            despesa_com.valor_total = total_com
-            despesa_com.nf_info = nf_com
-            despesa_com.ativo = True
-            despesa_com.save()
-        else:
-            despesa_com = Despesa.objects.create(
-                tipo=tipo_com_obj, mes=despesa_inicial.mes, ano=despesa_inicial.ano,
-                valor_total=total_com, nf_info=nf_com, ativo=True
-            )
+        try:
+            with transaction.atomic(): # Garante que todas as operações no DB sejam feitas com sucesso, ou nenhuma será.
+                # --- INÍCIO DA LÓGICA DE LIMPEZA E CRIAÇÃO ---
+                # Apaga TODOS os registros antigos (e seus rateios) para evitar duplicatas
+                ids_para_deletar = list(despesas_com_antigas.values_list('id', flat=True)) + list(despesas_sem_antigas.values_list('id', flat=True))
+                Rateio.objects.filter(despesa_id__in=ids_para_deletar).delete()
+                # Opcional: apagar logs antigos se quiser, ou deixar para manter histórico
+                # LogAlteracao.objects.filter(despesa_id__in=ids_para_deletar).delete()
+                Despesa.objects.filter(id__in=ids_para_deletar).delete()
 
-        despesa_sem = None
-        tipo_sem_obj = TipoDespesa.objects.filter(nome__iexact=sem_nome).first()
-        if tipo_sem_obj:
-            despesa_sem = Despesa.objects.filter(tipo=tipo_sem_obj, mes=despesa_inicial.mes, ano=despesa_inicial.ano).first()
-            if despesa_sem:
-                despesa_sem.valor_total = total_sem
-                despesa_sem.nf_info = nf_sem
-                despesa_sem.ativo = True
-                despesa_sem.save()
-            else:
+                # Cria a nova e consolidada despesa "Com Sala"
+                tipo_com_obj = TipoDespesa.objects.get(nome__iexact=com_nome)
+                despesa_com = Despesa.objects.create(
+                    tipo=tipo_com_obj, mes=despesa_inicial.mes, ano=despesa_inicial.ano,
+                    valor_total=total_com, nf_info=nf_com, ativo=True if total_com > 0 else False
+                )
+
+                # Cria a nova e consolidada despesa "Sem Sala"
+                despesa_sem = None
+                tipo_sem_obj = TipoDespesa.objects.get(nome__iexact=sem_nome)
                 despesa_sem = Despesa.objects.create(
                     tipo=tipo_sem_obj, mes=despesa_inicial.mes, ano=despesa_inicial.ano,
-                    valor_total=total_sem, nf_info=nf_sem, ativo=True
+                    valor_total=total_sem, nf_info=nf_sem, ativo=True if total_sem > 0 else False
                 )
-        # --- FIM DA CORREÇÃO ---
+                # --- FIM DA LÓGICA DE LIMPEZA E CRIAÇÃO ---
 
-        # Recria os rateios
-        unidades = Unidade.objects.order_by('nome')
-        fracoes_map = {f.unidade.id: f.percentual for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa_com.tipo)}
-        fracoes_sem_map = {f.unidade.id: f.percentual for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=tipo_sem_obj)} if tipo_sem_obj else {}
+                # Recria os rateios para os novos objetos
+                unidades = Unidade.objects.order_by('nome')
+                fracoes_map_com = {f.unidade.id: Decimal(str(f.percentual)) for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa_com.tipo)}
+                for u in unidades:
+                    percentual = fracoes_map_com.get(u.id, Decimal('0'))
+                    if percentual > 1: percentual /= 100
+                    valor_rateio = total_com * percentual
+                    Rateio.objects.create(despesa=despesa_com, unidade=u, valor=valor_rateio)
 
-        valores_com = {}
-        valores_sem = {}
-        for u in unidades:
-            pct_com = fracoes_map.get(u.id, Decimal('0'))
-            pct_sem = fracoes_sem_map.get(u.id, Decimal('0'))
-            valores_com[u] = total_com * pct_com
-            valores_sem[u] = total_sem * pct_sem
+                fracoes_map_sem = {f.unidade.id: Decimal(str(f.percentual)) for f in FracaoPorTipoDespesa.objects.filter(tipo_despesa=despesa_sem.tipo)}
+                for u in unidades:
+                    percentual = fracoes_map_sem.get(u.id, Decimal('0'))
+                    if percentual > 1: percentual /= 100
+                    valor_rateio = total_sem * percentual
+                    Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valor_rateio)
 
-        Rateio.objects.filter(despesa=despesa_com).delete()
-        if despesa_sem:
-            Rateio.objects.filter(despesa=despesa_sem).delete()
+                # Lógica de Log reforçado...
+                def criar_logs_para_nfs(novas_nfs, nfs_antigas, despesa_obj, user):
+                    def nf_to_tuple(nf): return (nf.get('fornecedor'), nf.get('historico'), nf.get('numero'), str(nf.get('valor')))
 
-        for u in unidades:
-            Rateio.objects.create(despesa=despesa_com, unidade=u, valor=valores_com.get(u, 0))
-            if despesa_sem:
-                Rateio.objects.create(despesa=despesa_sem, unidade=u, valor=valores_sem.get(u, 0))
+                    set_antigo = {nf_to_tuple(nf) for nf in nfs_antigas}
+                    set_novo = {nf_to_tuple(nf) for nf in novas_nfs}
 
-        # Lógica de Log Inteligente
-        new_nf_count_com = len(nf_com)
-        if total_com != old_total_com:
-            acao = 'Editada'
-            if new_nf_count_com < old_nf_count_com:
-                acao = 'NF Excluída'
-            elif new_nf_count_com > old_nf_count_com:
-                acao = 'NF Adicionada'
+                    nfs_removidas = [nf for nf in nfs_antigas if nf_to_tuple(nf) not in set_novo]
+                    nfs_adicionadas = [nf for nf in novas_nfs if nf_to_tuple(nf) not in set_antigo]
 
-            LogAlteracao.objects.create(
-                usuario=request.user, modelo=despesa_com.tipo.nome, objeto_id=str(despesa_com.pk),
-                acao=acao, descricao=f"Valor 'Com Sala' alterado de R$ {old_total_com:.2f} para R$ {total_com:.2f}",
-                despesa=despesa_com, valor=total_com, mes_referencia=despesa_com.mes, ano_referencia=despesa_com.ano,
-                snapshot={'nf_info': nf_com}
-            )
+                    for nf in nfs_removidas:
+                        LogAlteracao.objects.create(usuario=user, modelo=despesa_obj.tipo.nome, acao='NF Excluída', descricao=f"NF de {nf.get('fornecedor', 'N/A')} (R$ {Decimal(nf.get('valor', 0)):.2f}) foi removida.", despesa=despesa_obj, valor=despesa_obj.valor_total, mes_referencia=despesa_obj.mes, ano_referencia=despesa_obj.ano)
+                    for nf in nfs_adicionadas:
+                        LogAlteracao.objects.create(usuario=user, modelo=despesa_obj.tipo.nome, acao='NF Adicionada', descricao=f"NF de {nf.get('fornecedor', 'N/A')} (R$ {Decimal(nf.get('valor', 0)):.2f}) foi adicionada.", despesa=despesa_obj, valor=despesa_obj.valor_total, mes_referencia=despesa_obj.mes, ano_referencia=despesa_obj.ano)
 
-        new_nf_count_sem = len(nf_sem)
-        if despesa_sem and total_sem != old_total_sem:
-            acao = 'Editada'
-            if new_nf_count_sem < old_nf_count_sem:
-                acao = 'NF Excluída'
-            elif new_nf_count_sem > old_nf_count_sem:
-                acao = 'NF Adicionada'
+                criar_logs_para_nfs(nf_com, old_nfs_com, despesa_com, request.user)
+                criar_logs_para_nfs(nf_sem, old_nfs_sem, despesa_sem, request.user)
 
-            LogAlteracao.objects.create(
-                usuario=request.user, modelo=despesa_sem.tipo.nome, objeto_id=str(despesa_sem.pk),
-                acao=acao, descricao=f"Valor 'Sem Sala' alterado de R$ {old_total_sem:.2f} para R$ {total_sem:.2f}",
-                despesa=despesa_sem, valor=total_sem, mes_referencia=despesa_sem.mes, ano_referencia=despesa_sem.ano,
-                snapshot={'nf_info': nf_sem}
-            )
+                messages.success(request, 'Despesa atualizada e dados corrigidos com sucesso!')
+                return redirect('lista_despesas')
 
-        messages.success(request, 'Despesa atualizada com sucesso!')
-        return redirect('lista_despesas')
+        except Exception as e:
+            messages.error(request, f'Ocorreu um erro inesperado: {e}')
+            return redirect('lista_despesas')
 
-    # Lógica para o método GET
+
+    # Para o método GET, consolida as NFs para exibir no template
     nf_info_total = old_nfs_com + old_nfs_sem
+
     return render(request, 'despesas/editar_despesa.html', {
         'despesa': despesa_inicial,
         'nf_info': nf_info_total,
     })
+
+def parse_float(value):
+    try:
+        # Substitui a vírgula por ponto para conversão correta
+        return float(str(value).replace(',', '.'))
+    except (ValueError, TypeError):
+        return 0.0
+
 @login_required
 def ver_rateio(request, despesa_id):
     despesa = get_object_or_404(Despesa, id=despesa_id)
