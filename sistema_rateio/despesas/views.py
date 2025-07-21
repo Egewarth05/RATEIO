@@ -1529,3 +1529,8 @@ def limpar_tudo(request):
         post_delete.connect(recalc_fundo_reserva, sender=Despesa)
     messages.success(request, "Todas as despesas foram excluídas com sucesso!")
     return redirect('lista_despesas')
+
+@login_required
+def admin_panel(request):
+    """Renderiza a página intermediária do painel administrativo."""
+    return render(request, 'despesas/admin_panel.html')
